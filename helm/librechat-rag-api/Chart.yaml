@@ -25,9 +25,3 @@ version: 0.5.2
 appVersion: "v0.4.0"
 
 home: https://www.librechat.ai
-
-dependencies:
-  - name: postgresql
-    version: "15.5.38"
-    condition: postgresql.enabled
-    repository: "https://charts.bitnami.com/bitnami"
