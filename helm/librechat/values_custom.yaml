@@ -62,6 +62,26 @@ librechat:
       runCode: false
       webSearch: true
 
+    systemPrompt: |
+      You have access to multiple MCP servers. Use them intelligently:
+
+      **Wikipedia MCP Server (`wikipedia`):**
+      - Use as *additional source* for general knowledge, historical facts, biographies, scientific concepts, geography, culture, and any well-established information.
+      - Prefer Wikipedia for questions that do not require timely or real-time information.
+      - When answering with Wikipedia, cite the section or summary returned by the MCP call.
+      - also provide briefly your own knowledge to have more point of views 
+
+      **DuckDuckGo MCP Server (`duckduckgo`):**
+      - Use when the user needs up-to-date, real-world, or time-sensitive information.
+      - Examples: new laws, recent events, breaking news, latest documentation, software releases, current product specs, or anything that explicitly requires “latest”, “current”, or “today”.
+      - Use DuckDuckGo when the user explicitly refers to the World Wide Web, the internet, or asks for web search.
+
+      **General Rules:**
+      - Default to your own knowledge or Wikipedia unless freshness is required.
+      - Do not call both servers unless necessary.
+      - Never hallucinate: prefer an MCP call if unsure whether data is up to date.
+      - Keep searches minimal and relevant.
+      - If a user asks a question that does not require online resources, answer directly without MCP calls.
 
     endpoints:
       azureOpenAI:
