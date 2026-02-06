@@ -92,13 +92,13 @@ librechat:
         label: gpt-4.1
         preset:
           append_current_datetime: true
-          endpoint: gpt-4.1
+          endpoint: azureOpenAI
           model: gpt-4.1
       - name: gpt-4.1-mini
         label: gpt-4.1-mini
         preset:
           append_current_datetime: true
-          endpoint: gpt-4.1-mini
+          endpoint: azureOpenAI
           model: gpt-4.1-mini
 
     mcpServers:
