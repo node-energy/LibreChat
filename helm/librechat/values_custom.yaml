@@ -53,7 +53,7 @@ librechat:
       modelSelect: true
       parameters: false
       sidePanel: false
-      presets: false
+      presets: true
       prompts: true
       bookmarks: true
       multiConvo: false
@@ -61,7 +61,6 @@ librechat:
       customWelcome: "Hey {{user.name}}! Willkommen bei LibreChat :)"
       runCode: false
       webSearch: true
-
 
     endpoints:
       azureOpenAI:
@@ -84,6 +83,19 @@ librechat:
                 deploymentName: gpt-5-mini-deploy
               gpt-5-nano:
                 deploymentName: gpt-5-nano-deploy
+
+    modelSpecs:
+      enforce: true
+      prioritize: true
+      list:
+      - name: gpt-4.1
+        preset:
+          append_current_datetime: true
+          endpoint: gpt-4.1
+      - name: gpt-4.1-mini
+        preset:
+          append_current_datetime: true
+          endpoint: gpt-4.1-mini
 
     mcpServers:
       wikipedia:
