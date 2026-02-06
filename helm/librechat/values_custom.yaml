@@ -62,8 +62,7 @@ librechat:
       runCode: false
       webSearch: true
       systemPrompt: |
-        You are a helpful assistant.
-        The current date and time is {{current_datetime}}.
+        You are a helpful assistant. Please say Q.E.D after every answer.
         Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories). 
         If there is different versions of documentation please specify which version you are referring to. 
         Use general knowledge and learned data for stable concepts, background information, or explanations.
@@ -91,24 +90,6 @@ librechat:
               gpt-5-nano:
                 deploymentName: gpt-5-nano-deploy
 
-    modelSpecs:
-      enforce: true
-      prioritize: true
-      list:
-      - name: gpt-4.1
-        label: gpt-4.1
-        preset:
-          append_current_datetime: true
-          endpoint: azureOpenAI
-          model: gpt-4.1
-
-      - name: gpt-4.1-mini
-        label: gpt-4.1-mini
-        preset:
-          append_current_datetime: true
-          endpoint: azureOpenAI
-          model: gpt-4.1-mini
-
     mcpServers:
       wikipedia:
         type: stdio
@@ -124,6 +105,12 @@ librechat:
           - "duckduckgo-mcp-server"
         serverInstructions: "Use only public resources; do not access local files or internal networks."
 
+      MCP-timeserver:
+        type: stdio
+        command: uvx
+        args:
+          - "MCP-timeserver"
+        serverInstructions: "Use only public resources; do not access local files or internal networks."
 
   # name of existing Yaml configmap, key must be librechat.yaml
   existingConfigYaml: ""
