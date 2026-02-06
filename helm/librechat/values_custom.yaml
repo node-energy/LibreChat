@@ -61,6 +61,13 @@ librechat:
       customWelcome: "Hey {{user.name}}! Willkommen bei LibreChat :)"
       runCode: false
       webSearch: true
+      systemPrompt: |
+        You are a helpful assistant.
+        The current date and time is {{current_datetime}}.
+        Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories). 
+        If there is different versions of documentation please specify which version you are referring to. 
+        Use general knowledge and learned data for stable concepts, background information, or explanations.
+        Use Wikipedia for encyclopedic, non-time-sensitive facts.
 
     endpoints:
       azureOpenAI:
@@ -94,26 +101,13 @@ librechat:
           append_current_datetime: true
           endpoint: azureOpenAI
           model: gpt-4.1
-          systemPrompt: |
-            You are a helpful assistant.
-            The current date and time is {{current_datetime}}.
-            Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories). 
-            If there is different versions of documentation please specify which version you are referring to. 
-            Use general knowledge and learned data for stable concepts, background information, or explanations.
-            Use Wikipedia for encyclopedic, non-time-sensitive facts.
+
       - name: gpt-4.1-mini
         label: gpt-4.1-mini
         preset:
           append_current_datetime: true
           endpoint: azureOpenAI
           model: gpt-4.1-mini
-          systemPrompt: |
-            You are a helpful assistant.
-            The current date and time is {{current_datetime}}.
-            Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories). 
-            If there is different versions of documentation please specify which version you are referring to. 
-            Use general knowledge and learned data for stable concepts, background information, or explanations.
-            Use Wikipedia for encyclopedic, non-time-sensitive facts.
 
     mcpServers:
       wikipedia:
