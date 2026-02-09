@@ -1,0 +1,254 @@
+# Default values for librechat.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+global:
+   # existing Secret for all envs/ only Passwords. Can be locally generated with: kubectl create secret generic librechat-secret-envs --from-env-file=.env.example --dry-run=client -o yaml > secret-envs.yaml
+   # For better maintainabillity, you can put all vars directly in the config Section and only overwrite Secrets with this if nessesary.
+   # Required Values:
+   # - MEILI_MASTER_KEY
+  librechat:
+    existingSecretName: "librechat-credentials-env"
+    existingSecretApiKey: AZURE_OPENAI_API_KEY
+
+librechat:
+  configEnv:
+    DEBUG_PLUGINS: "false"
+    DEBUG_LOGGING: "false"
+    DEBUG_CONSOLE: "false"
+    LOG_LEVEL: "info"
+
+    ALLOW_REGISTRATION: "false"
+    ALLOW_SOCIAL_LOGIN: "true"
+    ALLOW_SOCIAL_REGISTRATION: "false"
+
+    OPENID_CLIENT_ID: ea52d0d0-0369-4f74-8db6-3902fb9f6c4e
+    OPENID_ISSUER: https://login.microsoftonline.com/791cc635-dca1-4d39-8639-295d41cb4d6e/v2.0/
+    OPENID_SCOPE: openid profile email
+    OPENID_CALLBACK_URL: /oauth/openid/callback
+    OPENID_BUTTON_LABEL: Login mit Microsoft
+    DOMAIN_CLIENT: https://chattest.internal.node.energy
+    DOMAIN_SERVER: https://chattest.internal.node.energy
+
+    ANTHROPIC_MODELS: claude-sonnet-4-5-20250929,claude-haiku-4-5-20251001
+    OPENAI_MODELS: gpt-5,gpt-5-mini
+    AZURE_USE_MODEL_AS_DEPLOYMENT_NAME: "false"
+
+    # IMPORTANT -- GENERATE your own: openssl rand -hex 32 and openssl rand -hex 16 for CREDS_IV. Best Practise: Put into Secret. See gloobal.librechat.existingSecretName
+
+    # existing Secret for all envs/ only Passwords. Can be locally generated with: kubectl create secret generic librechat-secret-envs --from-env-file=.env.example --dry-run=client -o yaml > secret-envs.yaml
+    # For better maintainabillity, you can put all vars directly in the config Section and only overwrite Secrets with this if nessesary.
+    # Required Values:
+    # - MEILI_MASTER_KEY
+  existingSecretName: "librechat-credentials-env"
+
+  # For adding a custom config yaml-file you can set the contents in this var. See https://www.librechat.ai/docs/configuration/librechat_yaml/example
+  configYamlContent:
+    version: 1.0.8
+
+    cache: false
+    interface:
+      modelSelect: true
+      parameters: false
+      sidePanel: false
+      presets: false
+      prompts: true
+      bookmarks: true
+      multiConvo: false
+      agents: false
+      customWelcome: "Hey {{user.name}}! Willkommen bei LibreChat :)"
+      runCode: false
+      webSearch: true
+
+
+    endpoints:
+      azureOpenAI:
+        titleModel: gpt-4.1-mini
+        groups:
+          - group: nodeenergyopenAI
+            apiKey: "${AZURE_API_KEY}"
+            instanceName: nodeenergy
+            version: 2024-12-01-preview
+            models:
+              gpt-4.1:
+                deploymentName: gpt-4.1-deploy
+              gpt-4.1-mini:
+                deploymentName: gpt-4.1-mini-deployment
+              gpt-4.1-nano:
+                deploymentName: gpt-4.1-nano-deployment
+              o4-mini:
+                deploymentName: o4-mini-deployment
+              gpt-5-mini:
+                deploymentName: gpt-5-mini-deploy
+              gpt-5-nano:
+                deploymentName: gpt-5-nano-deploy
+
+    mcpServers:
+      wikipedia:
+        type: stdio
+        command: uvx
+        args:
+          - "wikipedia-mcp"
+        serverInstructions: "Use only public resources; do not access local files or internal networks."
+
+      duckduckgo:
+        type: stdio
+        command: uvx
+        args:
+          - "duckduckgo-mcp-server"
+        serverInstructions: "Use only public resources; do not access local files or internal networks."
+
+      timeserver:
+        type: stdio
+        command: uvx
+        args:
+          - "mcp-server-time"
+        serverInstructions: "Use only public resources; do not access local files or internal networks."
+
+  # name of existing Yaml configmap, key must be librechat.yaml
+  existingConfigYaml: ""
+
+  # Volume used to store image Files uploaded to the Web UI
+  imageVolume:
+    enabled: true
+    size: 50Gi
+    accessModes: ReadWriteOnce
+    # storageClassName:
+
+# only lite RAG is supported
+librechat-rag-api:
+  enabled: false
+  # can be azure, openai, huggingface or huggingfacetei
+  embeddingsProvider: openai
+
+
+image:
+  repository: danny-avila/librechat
+  registry: ghcr.io
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+
+lifecycle: {}
+# # base for adding a custom banner // see https://github.com/danny-avila/LibreChat/pull/3952 for an example
+#   postStart:
+#     exec:
+#       command: ["/bin/sh", "-c", "npm run update-banner <displayFrom(Format: yyyy-mm-ddTHH:MM:SSZ)> <displayTo(Format: yyyy-mm-ddTHH:MM:SSZ)> <message> <isPublic(true/false)>"]
+
+
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  # readOnlyRootFilesystem: true # not supported yet
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 3080
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      traefik.ingress.kubernetes.io/router.middlewares: traefik-traefik-forward-auth@kubernetescrd
+  hosts:
+    - host: chattest.internal.node.energy
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: tls-certificate-librechat
+      hosts:
+        - chattest.internal.node.energy
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts: []
+# - name: foo
+#   mountPath: "/etc/foo"
+#   readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Strategy for LibreChat deployment updates
+updateStrategy:
+  type: Recreate
+
+mongodb:
+  enabled: false
+  auth:
+    enabled: false
+  databases:
+   - LibreChat
+  persistence:
+    size: 12Gi
+
+
+meilisearch:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClass: ""
+  image:
+    tag: "v1.7.3"
+  auth:
+    # Use an existing Kubernetes secret for the MEILI_MASTER_KEY
+    existingMasterKeySecret: "librechat-credentials-env"
