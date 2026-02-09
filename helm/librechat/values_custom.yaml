@@ -100,6 +100,12 @@ librechat:
           - "duckduckgo-mcp-server"
         serverInstructions: "Use only public resources; do not access local files or internal networks."
 
+      timeserver:
+        type: stdio
+        command: uvx
+        args:
+          - "mcp-server-time"
+        serverInstructions: "Use only public resources; do not access local files or internal networks."
 
   # name of existing Yaml configmap, key must be librechat.yaml
   existingConfigYaml: ""
