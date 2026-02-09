@@ -121,6 +121,15 @@ librechat:
           fetch: false
         directEndpoint: true
 
+      - name: "gpt-5-nano-deploy"
+        apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+        baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5-nano-deploy/chat/completions?api-version=2025-01-01-preview"
+        models:
+          default:
+            - gpt-5-nano-deploy
+          fetch: false
+        directEndpoint: true
+
     modelSpecs:
       list:
         - name: "gpt-4.1"
@@ -176,7 +185,6 @@ librechat:
               If you use the World Wide Web or other quotable sources (like technical documentation for software engineers), please cite the sources at the end of your answer as follows:              
               ## Quellen
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
-
         - name: "gpt-5-mini-deploy"
           label: "gpt-5-mini"
           description: "Azure (Europe)"
@@ -184,6 +192,32 @@ librechat:
             endpoint: "gpt-5-mini-deploy"
             model: "gpt-5-mini-deploy"
             modelLabel: "Azure [gpt-5-mini]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+              1. ALWAYS call mcp-server-time FIRST to get the current date and time: Format %d. %B %Y.  meFormat %d. %B %Y.  
+              2. Use this accurate timestamp for all date/time related responses
+              3. Report times in MEZ (Central European Time) and explicitly state the timezone
+
+              Do not show details of technical tool calls in your answer. Only give the final result.
+
+              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+              If there are different versions of documentation please specify which version you are referring to.
+              Use general knowledge and learned data for stable concepts, background information, or explanations.
+              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+
+              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
+              ## Quellen
+                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
+
+        - name: "gpt-5-nano-deploy"
+          label: "gpt-5-nano"
+          description: "Azure (Europe)"
+          preset:
+            endpoint: "gpt-5-nano-deploy"
+            model: "gpt-5-nano-deploy"
+            modelLabel: "Azure [gpt-5-nano]"
             promptPrefix: |
               You are a helpful assistant.
 
