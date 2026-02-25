@@ -62,73 +62,81 @@ librechat:
 
     endpoints:
       custom:
-      - name: openai-gpt-5
-        baseURL: https://api.openai.com/v1
-        apiKey: ${NE_OPENAI_API_KEY}
-        models:
-          fetch: true
-          default:
-            - gpt-5
+        - name: "openai-gpt-5"
+          baseURL: https://api.openai.com/v1
+          apiKey: ${NE_OPENAI_API_KEY}
+          models:
+            fetch: true
+            default:
+              - gpt-5
 
-      - name: openai-gpt-5-mini
-        baseURL: https://api.openai.com/v1
-        apiKey: ${NE_OPENAI_API_KEY}
-        models:
-          fetch: true
-          default:
-            - gpt-5-mini
+        - name: "openai-gpt-5-mini"
+          baseURL: https://api.openai.com/v1
+          apiKey: ${NE_OPENAI_API_KEY}
+          models:
+            fetch: true
+            default:
+              - gpt-5-mini
 
-      - name: claude-sonnet-4-5-20250929
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-sonnet-4-5-20250929
+        - name: "claude-opus-4-6"
+          baseURL: "https://api.anthropic.com/v1/"
+          apiKey: ${NE_ANTHROPIC_API_KEY}
+          models:
+            fetch: true
+            default:
+              - claude-opus-4-6
 
-      - name: claude-haiku-4-5-20251001
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-haiku-4-5-20251001
+        - name: "claude-sonnet-4-6"
+          baseURL: "https://api.anthropic.com/v1/"
+          apiKey: ${NE_ANTHROPIC_API_KEY}
+          models:
+            fetch: true
+            default:
+              - claude-sonnet-4-6
 
-      - name: "gpt-4.1-deploy"
-        apiKey: "${NE_AZURE_OPENAI_API_KEY}"
-        baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-deploy/chat/completions?api-version=2025-01-01-preview"
-        models:
-          default:
-            - gpt-4.1-deploy
-          fetch: false
-        directEndpoint: true
+        - name: "claude-haiku-4-5-20251001"
+          baseURL: "https://api.anthropic.com/v1/"
+          apiKey: ${NE_ANTHROPIC_API_KEY}
+          models:
+            fetch: true
+            default:
+              - claude-haiku-4-5-20251001
 
-      - name: "gpt-4.1-mini-deploy"
-        apiKey: "${NE_AZURE_OPENAI_API_KEY}"
-        baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-mini-deployment/chat/completions?api-version=2025-01-01-preview"
-        models:
-          default:
-            - gpt-4.1-mini-deploy
-          fetch: false
-        directEndpoint: true
+        - name: "gpt-4.1-deploy"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-deploy/chat/completions?api-version=2025-01-01-preview"
+          models:
+            default:
+              - gpt-4.1-deploy
+            fetch: false
+          directEndpoint: true
 
-      - name: "gpt-5-mini-deploy"
-        apiKey: "${NE_AZURE_OPENAI_API_KEY}"
-        baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5-mini-deploy/chat/completions?api-version=2025-01-01-preview"
-        models:
-          default:
-            - gpt-5-mini-deploy
-          fetch: false
-        directEndpoint: true
+        - name: "gpt-4.1-mini-deploy"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-mini-deployment/chat/completions?api-version=2025-01-01-preview"
+          models:
+            default:
+              - gpt-4.1-mini-deploy
+            fetch: false
+          directEndpoint: true
 
-      - name: "gpt-5-nano-deploy"
-        apiKey: "${NE_AZURE_OPENAI_API_KEY}"
-        baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5-nano-deploy/chat/completions?api-version=2025-01-01-preview"
-        models:
-          default:
-            - gpt-5-nano-deploy
-          fetch: false
-        directEndpoint: true
+        - name: "gpt-5-mini-deploy"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5-mini-deploy/chat/completions?api-version=2025-01-01-preview"
+          models:
+            default:
+              - gpt-5-mini-deploy
+            fetch: false
+          directEndpoint: true
+
+        - name: "gpt-5-nano-deploy"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5-nano-deploy/chat/completions?api-version=2025-01-01-preview"
+          models:
+            default:
+              - gpt-5-nano-deploy
+            fetch: false
+          directEndpoint: true
 
     modelSpecs:
       list:
@@ -142,14 +150,14 @@ librechat:
             modelLabel: "Azure [gpt-4.1]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
-
+              
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
@@ -169,14 +177,14 @@ librechat:
             modelLabel: "Azure [gpt-4.1-mini]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
-
+              
               Always use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software documentation, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
@@ -185,6 +193,7 @@ librechat:
               If you use the World Wide Web or other quotable sources (like technical documentation for software engineers), please cite the sources at the end of your answer as follows:              
               ## Quellen
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
+
         - name: "gpt-5-mini-deploy"
           label: "gpt-5-mini"
           description: "Azure (Europe)"
@@ -194,19 +203,19 @@ librechat:
             modelLabel: "Azure [gpt-5-mini]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and time: Format %d. %B %Y.  meFormat %d. %B %Y.  
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
-
+              
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
               Use Wikipedia for encyclopedic, non-time-sensitive facts.
-
+              
               If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
               ## Quellen
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
@@ -220,40 +229,66 @@ librechat:
             modelLabel: "Azure [gpt-5-nano]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and time: Format %d. %B %Y.  meFormat %d. %B %Y.  
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
-
+              
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
               Use Wikipedia for encyclopedic, non-time-sensitive facts.
-
+              
               If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
               ## Quellen
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
 
-        - name: "claude-sonnet-4-5-20250929"
-          label: "claude-sonnet-4-5"
+        - name: "claude-opus-4-6"
+          label: "claude-opus-4-6"
           description: "Anthropic"
           preset:
-            endpoint: "claude-sonnet-4-5-20250929"
-            model: "claude-sonnet-4-5-20250929"
-            modelLabel: "Anthropic [claude-sonnet-4-5]"
+            endpoint: "claude-opus-4-6"
+            model: "claude-opus-4-6"
+            modelLabel: "Anthropic [claude-opus-4-6]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and timeFormat %d. %B %Y.
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
+              
+              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+              If there are different versions of documentation please specify which version you are referring to.
+              Use general knowledge and learned data for stable concepts, background information, or explanations.
+              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+              
+              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
+              ## Quellen
+                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD) 
 
+        - name: "claude-sonnet-4-6"
+          label: "claude-sonnet-4-6"
+          description: "Anthropic"
+          preset:
+            endpoint: "claude-sonnet-4-6"
+            model: "claude-sonnet-4-6"
+            modelLabel: "Anthropic [claude-sonnet-4-6]"
+            promptPrefix: |
+              You are a helpful assistant.
+              
+              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+              1. ALWAYS call mcp-server-time FIRST to get the current date and timeFormat %d. %B %Y.
+              2. Use this accurate timestamp for all date/time related responses
+              3. Report times in MEZ (Central European Time) and explicitly state the timezone
+              
+              Do not show details of technical tool calls in your answer. Only give the final result.
+              
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
@@ -273,7 +308,7 @@ librechat:
             modelLabel: "Anthropic [claude-haiku-4-5]"
             promptPrefix: |
               You are a helpful assistant.
-
+              
               IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
               1. ALWAYS call mcp-server-time FIRST to get the current date and time: Format %d. %B %Y.  
               2. Use this accurate timestamp for all date/time related responses
@@ -304,9 +339,9 @@ librechat:
               1. ALWAYS call mcp-server-time FIRST to get the current date and timeFormat %d. %B %Y. 
               2. Use this accurate timestamp for all date/time related responses
               3. Report times in MEZ (Central European Time) and explicitly state the timezone
-
+              
               Do not show details of technical tool calls in your answer. Only give the final result.
-
+              
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
@@ -332,7 +367,8 @@ librechat:
               Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+              Use Wikipedia for encyclopedic, non-time-sensitive facts.      
+
     mcpServers:
       wikipedia:
         type: stdio
