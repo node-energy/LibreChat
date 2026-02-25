@@ -85,7 +85,7 @@ librechat:
           fetch: true
           default:
             - claude-opus-4-6
-            -
+
       - name: claude-sonnet-4-6
         baseURL: "https://api.anthropic.com/v1/"
         apiKey: ${NE_ANTHROPIC_API_KEY}
@@ -368,6 +368,7 @@ librechat:
               If there are different versions of documentation please specify which version you are referring to.
               Use general knowledge and learned data for stable concepts, background information, or explanations.
               Use Wikipedia for encyclopedic, non-time-sensitive facts.
+
     mcpServers:
       wikipedia:
         type: stdio
@@ -474,7 +475,6 @@ resources: {}
   # requests:
   #   cpu: 100m
   #   memory: 128Mi
-
 
 autoscaling:
   enabled: false
