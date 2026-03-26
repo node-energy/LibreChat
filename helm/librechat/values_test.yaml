@@ -315,7 +315,7 @@ librechat:
           description: "Anthropic"
           default: true
           preset:
-            endpoint: "anthropic"
+            endpoint: "claude-haiku-4-5-20251001"
             model: "claude-haiku-4-5-20251001"
             modelLabel: "Anthropic [claude-haiku-4-5]"
             promptPrefix: |
