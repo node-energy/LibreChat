@@ -70,29 +70,13 @@ librechat:
           default:
             - gpt-5-mini
 
-      - name: "claude-opus-4-6"
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-opus-4-6
-
-      - name: "claude-sonnet-4-6"
+      - name: "anthropic-endpoint"
         baseURL: "https://api.anthropic.com/v1/"
         apiKey: ${NE_ANTHROPIC_API_KEY}
         models:
           fetch: true
           default:
             - claude-sonnet-4-6
-
-      - name: "claude-haiku-4-5-20251001"
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-haiku-4-5-20251001
 
       - name: "gpt-4.1-deploy"
         apiKey: "${NE_AZURE_OPENAI_API_KEY}"
@@ -253,7 +237,7 @@ librechat:
           label: "claude-opus-4-6"
           description: "Anthropic"
           preset:
-            endpoint: "claude-opus-4-6"
+            endpoint: "anthropic-endpoint"
             model: "claude-opus-4-6"
             modelLabel: "Anthropic [claude-opus-4-6]"
             promptPrefix: |
@@ -279,7 +263,7 @@ librechat:
           label: "claude-sonnet-4-6"
           description: "Anthropic"
           preset:
-            endpoint: "claude-sonnet-4-6"
+            endpoint: "anthropic-endpoint"
             model: "claude-sonnet-4-6"
             modelLabel: "Anthropic [claude-sonnet-4-6]"
             promptPrefix: |
@@ -306,7 +290,7 @@ librechat:
           description: "Anthropic"
           default: true
           preset:
-            endpoint: "claude-haiku-4-5-20251001"
+            endpoint: "anthropic-endpoint"
             model: "claude-haiku-4-5-20251001"
             modelLabel: "Anthropic [claude-haiku-4-5]"
             promptPrefix: |
