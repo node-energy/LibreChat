@@ -143,7 +143,6 @@ librechat:
         baseURL: "https://api.mistral.ai/v1"
         models:
           default:
-            - mistral-small
             - mistral-large-latest
           fetch: true
         titleConvo: true
