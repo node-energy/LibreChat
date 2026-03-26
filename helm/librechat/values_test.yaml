@@ -62,15 +62,7 @@ librechat:
 
     endpoints:
       custom:
-      - name: "openai-gpt-5"
-        baseURL: https://api.openai.com/v1
-        apiKey: ${NE_OPENAI_API_KEY}
-        models:
-          fetch: true
-          default:
-            - gpt-5
-
-      - name: "openai-gpt-5-mini"
+      - name: "openai-endpoint"
         baseURL: https://api.openai.com/v1
         apiKey: ${NE_OPENAI_API_KEY}
         models:
@@ -340,7 +332,7 @@ librechat:
           label: "gpt-5-mini"
           description: "openAI"
           preset:
-            endpoint: "openai-gpt-5-mini"
+            endpoint: "openai-endpoint"
             model: "gpt-5-mini"
             modelLabel: "OpenAI [gpt-5-mini]"
             promptPrefix: |
@@ -362,7 +354,7 @@ librechat:
           label: "gpt-5"
           description: "openAI"
           preset:
-            endpoint: "openai-gpt-5"
+            endpoint: "openai-endpoint"
             model: "gpt-5"
             modelLabel: "OpenAI [gpt-5]"
             promptPrefix: |
