@@ -62,15 +62,7 @@ librechat:
 
     endpoints:
       custom:
-      - name: "openai-gpt-5"
-        baseURL: https://api.openai.com/v1
-        apiKey: ${NE_OPENAI_API_KEY}
-        models:
-          fetch: true
-          default:
-            - gpt-5
-
-      - name: "openai-gpt-5-mini"
+      - name: "openai-endpoint"
         baseURL: https://api.openai.com/v1
         apiKey: ${NE_OPENAI_API_KEY}
         models:
@@ -78,29 +70,13 @@ librechat:
           default:
             - gpt-5-mini
 
-      - name: "claude-opus-4-6"
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-opus-4-6
-
-      - name: "claude-sonnet-4-6"
+      - name: "anthropic-endpoint"
         baseURL: "https://api.anthropic.com/v1/"
         apiKey: ${NE_ANTHROPIC_API_KEY}
         models:
           fetch: true
           default:
             - claude-sonnet-4-6
-
-      - name: "claude-haiku-4-5-20251001"
-        baseURL: "https://api.anthropic.com/v1/"
-        apiKey: ${NE_ANTHROPIC_API_KEY}
-        models:
-          fetch: true
-          default:
-            - claude-haiku-4-5-20251001
 
       - name: "gpt-4.1-deploy"
         apiKey: "${NE_AZURE_OPENAI_API_KEY}"
@@ -143,7 +119,6 @@ librechat:
         baseURL: "https://api.mistral.ai/v1"
         models:
           default:
-            - mistral-small
             - mistral-large-latest
           fetch: true
         titleConvo: true
@@ -262,7 +237,7 @@ librechat:
           label: "claude-opus-4-6"
           description: "Anthropic"
           preset:
-            endpoint: "claude-opus-4-6"
+            endpoint: "anthropic-endpoint"
             model: "claude-opus-4-6"
             modelLabel: "Anthropic [claude-opus-4-6]"
             promptPrefix: |
@@ -288,7 +263,7 @@ librechat:
           label: "claude-sonnet-4-6"
           description: "Anthropic"
           preset:
-            endpoint: "claude-sonnet-4-6"
+            endpoint: "anthropic-endpoint"
             model: "claude-sonnet-4-6"
             modelLabel: "Anthropic [claude-sonnet-4-6]"
             promptPrefix: |
@@ -315,7 +290,7 @@ librechat:
           description: "Anthropic"
           default: true
           preset:
-            endpoint: "anthropic"
+            endpoint: "anthropic-endpoint"
             model: "claude-haiku-4-5-20251001"
             modelLabel: "Anthropic [claude-haiku-4-5]"
             promptPrefix: |
@@ -341,7 +316,7 @@ librechat:
           label: "gpt-5-mini"
           description: "openAI"
           preset:
-            endpoint: "openai-gpt-5-mini"
+            endpoint: "openai-endpoint"
             model: "gpt-5-mini"
             modelLabel: "OpenAI [gpt-5-mini]"
             promptPrefix: |
@@ -363,7 +338,7 @@ librechat:
           label: "gpt-5"
           description: "openAI"
           preset:
-            endpoint: "openai-gpt-5"
+            endpoint: "openai-endpoint"
             model: "gpt-5"
             modelLabel: "OpenAI [gpt-5]"
             promptPrefix: |
