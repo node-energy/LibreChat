@@ -138,6 +138,18 @@ librechat:
             fetch: false
           directEndpoint: true
 
+        - name: "mistral"
+          apiKey: "${MISTRAL_API_KEY}"
+          baseURL: "https://api.mistral.ai/v1"
+          models:
+            default:
+              - mistral-small
+              - mistral-large-latest
+            fetch: true
+          titleConvo: true
+          titleModel: "mistral-small"
+          dropParams: ["stop", "user", "frequency_penalty", "presence_penalty"]
+
     modelSpecs:
       list:
         - name: "gpt-4.1"
@@ -410,6 +422,50 @@ librechat:
               Use Wikipedia for encyclopedic, non-time-sensitive facts.
               If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)   
+
+        - name: "mistral-small"
+          label: "mistral-small"
+          description: "Mistral (Europe)"
+          preset:
+            endpoint: "mistral"
+            model: "mistral-small"
+            modelLabel: "mistral [mistral-small]"
+            promptPrefix: |
+              You are a helpful assistant.
+              
+              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+              1. ALWAYS call mcp-server-time FIRST to get the current date and timeFormat %d. %B %Y.
+              2. Use this accurate timestamp for all date/time related responses
+              3. Report times in MEZ (Central European Time) and explicitly state the timezone
+              
+              Do not show details of technical tool calls in your answer. Only give the final result.
+              
+              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+              If there are different versions of documentation please specify which version you are referring to.
+              Use general knowledge and learned data for stable concepts, background information, or explanations.
+              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+
+        - name: "mistral-large"
+          label: "mistral-large"
+          description: "Mistral (Europe)"
+          preset:
+            endpoint: "mistral"
+            model: "mistral-large-latest"
+            modelLabel: "mistral [mistral-large]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+              1. ALWAYS call mcp-server-time FIRST to get the current date and timeFormat %d. %B %Y.
+              2. Use this accurate timestamp for all date/time related responses
+              3. Report times in MEZ (Central European Time) and explicitly state the timezone
+
+              Do not show details of technical tool calls in your answer. Only give the final result.
+
+              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+              If there are different versions of documentation please specify which version you are referring to.
+              Use general knowledge and learned data for stable concepts, background information, or explanations.
+              Use Wikipedia for encyclopedic, non-time-sensitive facts.
 
     mcpServers:
       wikipedia:
