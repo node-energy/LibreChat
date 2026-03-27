@@ -32,6 +32,10 @@ librechat:
     DOMAIN_CLIENT: https://chat.internal.node.energy
     DOMAIN_SERVER: https://chat.internal.node.energy
 
+    GOOGLE_SERVICE_KEY_FILE: ""
+    ANTHROPIC_USE_VERTEX: "false"
+    ANTHROPIC_VERTEX_REGION: "europe-west1"
+
     AZURE_USE_MODEL_AS_DEPLOYMENT_NAME: "false"
 
     # IMPORTANT -- GENERATE your own: openssl rand -hex 32 and openssl rand -hex 16 for CREDS_IV. Best Practise: Put into Secret. See gloobal.librechat.existingSecretName
