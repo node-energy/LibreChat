@@ -413,27 +413,27 @@ librechat:
               If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
                 - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)   
 
-    mcpServers:
-      wikipedia:
-        type: stdio
-        command: uvx
-        args:
-          - "wikipedia-mcp"
-        serverInstructions: "Use only public resources; do not access local files or internal networks."
-
-      duckduckgo:
-        type: stdio
-        command: uvx
-        args:
-          - "duckduckgo-mcp-server"
-        serverInstructions: "Use only public resources; do not access local files or internal networks."
-
-      timeserver:
-        type: stdio
-        command: uvx
-        args:
-          - "mcp-server-time"
-        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#    mcpServers:
+#      wikipedia:
+#        type: stdio
+#        command: uvx
+#        args:
+#          - "wikipedia-mcp"
+#        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#
+#      duckduckgo:
+#        type: stdio
+#        command: uvx
+#        args:
+#          - "duckduckgo-mcp-server"
+#        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#
+#      timeserver:
+#        type: stdio
+#        command: uvx
+#        args:
+#          - "mcp-server-time"
+#        serverInstructions: "Use only public resources; do not access local files or internal networks."
 
   # name of existing Yaml configmap, key must be librechat.yaml
   existingConfigYaml: ""
