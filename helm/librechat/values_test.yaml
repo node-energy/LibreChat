@@ -138,8 +138,29 @@ librechat:
             fetch: false
           directEndpoint: true
 
+        - name: "mistral"
+          apiKey: "${MISTRAL_API_KEY}"
+          baseURL: "https://api.mistral.ai/v1"
+          models:
+            default:
+              - mistral-large-latest
+            fetch: true
+          titleConvo: true
+          titleModel: "mistral-small"
+          dropParams: [ "stop", "user", "frequency_penalty", "presence_penalty" ]
+
     modelSpecs:
       list:
+        - name: "mistral"
+          label: "mistral"
+          description: "mistral (Europe)"
+          preset:
+            endpoint: "mistral"
+            model: "mistral-large-latest"
+            modelLabel: "mistral-large"
+            promptPrefix: |
+              You are a helpful assistant.
+
         - name: "gpt-4.1"
           label: "gpt-4.1"
           description: "Azure (Europe)"
