@@ -66,21 +66,21 @@ librechat:
 
     endpoints:
       custom:
-        - name: "openai-gpt-5"
-          baseURL: https://api.openai.com/v1
-          apiKey: ${NE_OPENAI_API_KEY}
-          models:
-            fetch: true
-            default:
-              - gpt-5
-
-        - name: "openai-gpt-5-mini"
-          baseURL: https://api.openai.com/v1
-          apiKey: ${NE_OPENAI_API_KEY}
-          models:
-            fetch: true
-            default:
-              - gpt-5-mini
+#        - name: "openai-gpt-5"
+#          baseURL: https://api.openai.com/v1
+#          apiKey: ${NE_OPENAI_API_KEY}
+#          models:
+#            fetch: true
+#            default:
+#              - gpt-5
+#
+#        - name: "openai-gpt-5-mini"
+#          baseURL: https://api.openai.com/v1
+#          apiKey: ${NE_OPENAI_API_KEY}
+#          models:
+#            fetch: true
+#            default:
+#              - gpt-5-mini
 
         - name: "claude-opus-4-6"
           baseURL: "https://api.anthropic.com/v1/"
@@ -142,6 +142,17 @@ librechat:
             fetch: false
           directEndpoint: true
 
+        - name: "mistral"
+          apiKey: "${MISTRAL_API_KEY}"
+          baseURL: "https://api.mistral.ai/v1"
+          models:
+            default:
+              - mistral-large-latest
+            fetch: true
+          titleConvo: true
+          titleModel: "mistral-small"
+          dropParams: [ "stop", "user", "frequency_penalty", "presence_penalty" ]
+
     modelSpecs:
       list:
         - name: "gpt-4.1"
@@ -154,26 +165,6 @@ librechat:
             modelLabel: "Azure [gpt-4.1]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
         - name: "gpt-4.1-mini"
           label: "gpt-4.1-mini"
@@ -185,26 +176,6 @@ librechat:
             modelLabel: "Azure [gpt-4.1-mini]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
         - name: "gpt-5-mini-deploy"
           label: "gpt-5-mini"
@@ -215,26 +186,6 @@ librechat:
             modelLabel: "Azure [gpt-5-mini]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
         - name: "gpt-5-nano-deploy"
           label: "gpt-5-nano"
@@ -245,26 +196,16 @@ librechat:
             modelLabel: "Azure [gpt-5-nano]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
+
+        - name: "mistral"
+          label: "mistral"
+          description: "mistral (Europe)"
+          preset:
+            endpoint: "mistral"
+            model: "mistral-large-latest"
+            modelLabel: "mistral-large"
+            promptPrefix: |
+              You are a helpful assistant.
 
         - name: "claude-opus-4-6"
           label: "claude-opus-4-6"
@@ -275,26 +216,6 @@ librechat:
             modelLabel: "Anthropic [claude-opus-4-6]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
         - name: "claude-sonnet-4-6"
           label: "claude-sonnet-4-6"
@@ -305,26 +226,6 @@ librechat:
             modelLabel: "Anthropic [claude-sonnet-4-6]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
         - name: "claude-haiku-4-5-20251001"
           label: "claude-haiku-4-5"
@@ -336,107 +237,88 @@ librechat:
             modelLabel: "Anthropic [claude-haiku-4-5]"
             promptPrefix: |
               You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
 
-        - name: "gpt-5-mini"
-          label: "gpt-5-mini"
-          description: "openAI"
-          preset:
-            endpoint: "openai-gpt-5-mini"
-            model: "gpt-5-mini"
-            modelLabel: "OpenAI [gpt-5-mini]"
-            promptPrefix: |
-              You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
-
-        - name: "gpt-5"
-          label: "gpt-5"
-          description: "openAI"
-          preset:
-            endpoint: "openai-gpt-5"
-            model: "gpt-5"
-            modelLabel: "OpenAI [gpt-5]"
-            promptPrefix: |
-              You are a helpful assistant.
-              
-              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
-              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
-              2. Use this accurate timestamp for all date/time related responses
-              3. Report times in MEZ (Central European Time) and explicitly state the timezone
-              
-              Always answer in the same language as the user's question, adapting your response to match their language.
-              
-              Do not show details of technical tool calls in your answer. Only give the final result.
-              
-              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
-              If a web search yields no results or encounters a rate limit, do not retry more than two times.
-              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
-              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current. 
-              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
-              If there are different versions of documentation please specify which version you are referring to.
-              Use Wikipedia for encyclopedic, non-time-sensitive facts.
-              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:              
-                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)   
-
-#    mcpServers:
-#      wikipedia:
-#        type: stdio
-#        command: uvx
-#        args:
-#          - "wikipedia-mcp"
-#        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#        - name: "gpt-5-mini"
+#          label: "gpt-5-mini"
+#          description: "openAI"
+#          preset:
+#            endpoint: "openai-gpt-5-mini"
+#            model: "gpt-5-mini"
+#            modelLabel: "OpenAI [gpt-5-mini]"
+#            promptPrefix: |
+#              You are a helpful assistant.
 #
-#      duckduckgo:
-#        type: stdio
-#        command: uvx
-#        args:
-#          - "duckduckgo-mcp-server"
-#        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+#              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
+#              2. Use this accurate timestamp for all date/time related responses
+#              3. Report times in MEZ (Central European Time) and explicitly state the timezone
 #
-#      timeserver:
-#        type: stdio
-#        command: uvx
-#        args:
-#          - "mcp-server-time"
-#        serverInstructions: "Use only public resources; do not access local files or internal networks."
+#              Always answer in the same language as the user's question, adapting your response to match their language.
+#
+#              Do not show details of technical tool calls in your answer. Only give the final result.
+#
+#              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+#              If a web search yields no results or encounters a rate limit, do not retry more than two times.
+#              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
+#              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current.
+#              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
+#              If there are different versions of documentation please specify which version you are referring to.
+#              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+#
+#              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:
+#                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
+#
+#        - name: "gpt-5"
+#          label: "gpt-5"
+#          description: "openAI"
+#          preset:
+#            endpoint: "openai-gpt-5"
+#            model: "gpt-5"
+#            modelLabel: "OpenAI [gpt-5]"
+#            promptPrefix: |
+#              You are a helpful assistant.
+#
+#              IMPORTANT: Before answering any question that involves dates, times, or temporal calculations:
+#              1. ALWAYS call mcp-server-time FIRST to get the current date and time. Format %d. %B %Y.
+#              2. Use this accurate timestamp for all date/time related responses
+#              3. Report times in MEZ (Central European Time) and explicitly state the timezone
+#
+#              Always answer in the same language as the user's question, adapting your response to match their language.
+#
+#              Do not show details of technical tool calls in your answer. Only give the final result.
+#
+#              Use web search when information may be time-sensitive, related to current events, recent news, or up-to-date documentation (e.g. software versions, releases, security advisories).
+#              If a web search yields no results or encounters a rate limit, do not retry more than two times.
+#              If still unsuccessful, inform the user in their language that up-to-date web results are currently unavailable.
+#              Provide an answer based on general knowledge or previously available information, and clearly indicate that it may not be current.
+#              If you use general knowledge instead of web search, make sure to inform the user of this in their language.
+#              If there are different versions of documentation please specify which version you are referring to.
+#              Use Wikipedia for encyclopedic, non-time-sensitive facts.
+#              If you use the World Wide Web or other quotable sources, please cite the sources at the end of your answer as follows:
+#                - <Tool>: <Titel> — <URL> (abgerufen: YYYY-MM-DD)
+
+      #    mcpServers:
+      #      wikipedia:
+      #        type: stdio
+      #        command: uvx
+      #        args:
+      #          - "wikipedia-mcp"
+      #        serverInstructions: "Use only public resources; do not access local files or internal networks."
+      #
+      #      duckduckgo:
+      #        type: stdio
+      #        command: uvx
+      #        args:
+      #          - "duckduckgo-mcp-server"
+      #        serverInstructions: "Use only public resources; do not access local files or internal networks."
+      #
+      #      timeserver:
+      #        type: stdio
+      #        command: uvx
+      #        args:
+      #          - "mcp-server-time"
+      #        serverInstructions: "Use only public resources; do not access local files or internal networks."
+
 
   # name of existing Yaml configmap, key must be librechat.yaml
   existingConfigYaml: ""
