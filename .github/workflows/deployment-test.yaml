@@ -6,6 +6,7 @@ on:
       - 'test'
 
 env:
+  AZURE_CLIENT_ID: "199ddfee-1a06-4417-95be-3a5e76b3f374"
   AZURE_ACR_URL: "nodeenergy.azurecr.io"
   CLUSTER_NAME: "nodeenergy_internal"
   NAMESPACE: "librechattest"
@@ -22,7 +23,7 @@ jobs:
         id: setup
         uses: ./.github/actions/setup
         with:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           AZURE_CLIENT_PASSWORD: ${{ secrets.AZURE_CLIENT_PASSWORD }}
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
           AZURE_ACR_URL: ${{ env.AZURE_ACR_URL }}
@@ -58,7 +59,7 @@ jobs:
         id: setup
         uses: ./.github/actions/setup
         with:
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           AZURE_CLIENT_PASSWORD: ${{ secrets.AZURE_CLIENT_PASSWORD }}
           AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
           AZURE_ACR_URL: ${{ env.AZURE_ACR_URL }}
