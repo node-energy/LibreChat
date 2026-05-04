@@ -22,4 +22,4 @@ spec:
                 - name: LIBRECHAT_URL
                   value: "http://librechat-librechat:3080"
                 - name: STALE_DAYS
-                  value: "3"
+                  value: "180"
