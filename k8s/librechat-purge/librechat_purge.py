@@ -20,7 +20,8 @@ LIBRECHAT_URL = os.getenv("LIBRECHAT_URL", "http://librechat-librechat:3080")
 def mint_token(secret: str, user_id: str) -> str:
     """Mint a JWT token using LibreChat's secret."""
     payload = {
-        "id": user_id,
+        "id": user_id,       # LibreChat checks this field
+        "userId": user_id,   # some middleware variants use this
         "iat": int(time.time()),
         "exp": int(time.time()) + 3600,  # 1 hour
     }
@@ -177,16 +178,23 @@ def main():
     # ── Delete files via API ──────────────────────────────────────────────────
     token = mint_token(args.jwt_secret, args.user_id)
     print(f"Deleting {len(files)} file(s) via API...", end=" ", flush=True)
-    ok = delete_files_via_api(files, token, args.url)
-    print("done." if ok else "failed (see above).")
+    files_ok = delete_files_via_api(files, token, args.url)
+    print("done." if files_ok else "failed (see above).")
 
     # ── Delete DB records ─────────────────────────────────────────────────────
     print("Deleting DB records...", end=" ", flush=True)
     del_conversations, del_messages = delete_conversations_from_db(db, conv_ids)
     print("done.")
 
-    print(f"\n✅  Deleted {del_conversations} conversation(s), {del_messages} message(s), "
-          f"{len(files)} file(s) via API.")
+    # ── Summary ───────────────────────────────────────────────────────────────
+    print()
+    if files_ok:
+        print(f"✅  Deleted {del_conversations} conversation(s), "
+              f"{del_messages} message(s), {len(files)} file(s) via API.")
+    else:
+        print(f"⚠️  Partially completed: deleted {del_conversations} conversation(s) "
+              f"and {del_messages} message(s) from DB, but file deletion via API failed — "
+              f"{len(files)} file(s) may still exist on disk.")
 
 
 if __name__ == "__main__":
