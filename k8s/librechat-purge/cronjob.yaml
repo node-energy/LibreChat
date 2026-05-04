@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: librechat-purge
+spec:
+  schedule: "0 0 * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: purge
+              image: nodeenergy.azurecr.io/librechat-purge:latest
+              args: ["--delete", "--yes"]
+              envFrom:
+                - secretRef:
+                    name: librechat-credentials-env
+              env:
+                - name: LIBRECHAT_URL
+                  value: "http://librechat-librechat:3080"
+                - name: STALE_DAYS
+                  value: "180"

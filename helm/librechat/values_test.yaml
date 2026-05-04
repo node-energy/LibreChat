@@ -48,6 +48,8 @@ librechat:
 
     cache: false
     interface:
+      temporaryChat: true
+      temporaryChatRetention: 14
       modelSelect: false
       parameters: false
       sidePanel: false
