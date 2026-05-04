@@ -2,30 +2,13 @@ from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient
 import argparse
 import os
-import time
-
-import jwt
-import requests
 
 # ── Config ────────────────────────────────────────────────────────────────────
 MONGO_URI = os.getenv("LIBRECHAT_MONGO_URI", "mongodb://librechat-mongodb:27017")
 DB_NAME = os.getenv("LIBRECHAT_DB_NAME", "LibreChat")
 DAYS_STALE = int(os.getenv("STALE_DAYS", "180"))
-JWT_SECRET = os.getenv("JWT_SECRET", "")
-JWT_USER_ID = os.getenv("LIBRECHAT_JWT_USER_ID", "")
-LIBRECHAT_URL = os.getenv("LIBRECHAT_URL", "http://librechat-librechat:3080")
+UPLOADS_PATH = os.getenv("UPLOADS_PATH", "/uploads")
 # ──────────────────────────────────────────────────────────────────────────────
-
-
-def mint_token(secret: str, user_id: str) -> str:
-    """Mint a JWT token using LibreChat's secret."""
-    payload = {
-        "id": user_id,       # LibreChat checks this field
-        "userId": user_id,   # some middleware variants use this
-        "iat": int(time.time()),
-        "exp": int(time.time()) + 3600,  # 1 hour
-    }
-    return jwt.encode(payload, secret, algorithm="HS256")
 
 
 def get_stale_conversations(db, days: int) -> list[dict]:
@@ -52,35 +35,42 @@ def collect_files(db, conv_ids: list[str]) -> list[dict]:
                 results.append({
                     "file_id": file_id,
                     "filepath": file.get("filepath", ""),
-                    "source": "local",
+                    "source": file.get("source", "local"),
                     "embedded": file.get("embedded", False),
                 })
     return results
 
 
-def delete_files_via_api(files: list[dict], token: str, base_url: str) -> bool:
+def delete_files_directly(db, files: list[dict], uploads_path: str) -> tuple[int, int]:
     if not files:
-        return True
-    resp = requests.delete(
-        f"{base_url}/api/files",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Origin": base_url,
-            "Referer": f"{base_url}/",
-            "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        },
-        json={"files": files},
-        timeout=30,
-    )
-    if not resp.ok:
-        print(f"  ⚠️  API file deletion failed: {resp.status_code} {resp.text}")
-        return False
-    if "Illegal request" in resp.text:
-        print(f"  ⚠️  API rejected request: {resp.text}")
-        return False
-    return True
+        return 0, 0
+
+    file_ids = [f["file_id"] for f in files if f.get("file_id")]
+    filepaths = [f["filepath"] for f in files if f.get("filepath")]
+
+    # Warn about non-local files that we can't delete from disk
+    non_local = [f for f in files if f.get("source") not in ("local", "")]
+    if non_local:
+        print(f"  ⚠️  {len(non_local)} file(s) have non-local source and will only be removed from DB:")
+        for f in non_local:
+            print(f"      {f.get('source')} — {f.get('filepath')}")
+
+    # Remove from MongoDB files collection
+    db_result = db["files"].delete_many({"file_id": {"$in": file_ids}})
+
+    # Remove from disk
+    removed = 0
+    for filepath in filepaths:
+        full_path = os.path.join(uploads_path, filepath.lstrip("/"))
+        try:
+            os.remove(full_path)
+            removed += 1
+        except FileNotFoundError:
+            pass  # already gone
+        except OSError as e:
+            print(f"  ⚠️  Could not delete {full_path}: {e}")
+
+    return db_result.deleted_count, removed
 
 
 def delete_conversations_from_db(db, conv_ids: list[str]) -> tuple[int, int]:
@@ -119,18 +109,14 @@ def print_table(convos: list[dict], show_ids: bool) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Delete stale LibreChat conversations via API + MongoDB."
+        description="Delete stale LibreChat conversations and files directly via MongoDB + disk."
     )
     parser.add_argument("--uri", default=MONGO_URI, help="MongoDB URI")
     parser.add_argument("--db", default=DB_NAME, help="Database name")
     parser.add_argument("--days", default=DAYS_STALE, type=int,
                         help="Inactivity threshold in days (default: 180)")
-    parser.add_argument("--url", default=LIBRECHAT_URL,
-                        help=f"LibreChat base URL (default: {LIBRECHAT_URL})")
-    parser.add_argument("--jwt-secret", default=JWT_SECRET,
-                        help="LibreChat JWT secret (or set LIBRECHAT_JWT_SECRET)")
-    parser.add_argument("--user-id", default=JWT_USER_ID,
-                        help="User ObjectId to embed in token (or set LIBRECHAT_JWT_USER_ID)")
+    parser.add_argument("--uploads-path", default=UPLOADS_PATH,
+                        help=f"Path to LibreChat uploads directory (default: {UPLOADS_PATH})")
     parser.add_argument("--show-ids", action="store_true",
                         help="Print conversationId in table")
     parser.add_argument("--delete", action="store_true",
@@ -153,14 +139,6 @@ def main():
     if not args.delete:
         return
 
-    # ── Validate auth args ────────────────────────────────────────────────────
-    if not args.jwt_secret:
-        print("\n❌  --jwt-secret (or LIBRECHAT_JWT_SECRET) is required for deletion.")
-        return
-    if not args.user_id:
-        print("\n❌  --user-id (or LIBRECHAT_JWT_USER_ID) is required for deletion.")
-        return
-
     # ── Confirm ───────────────────────────────────────────────────────────────
     conv_ids = [c["conversationId"] for c in convos if c.get("conversationId")]
     files = collect_files(db, conv_ids)
@@ -175,11 +153,10 @@ def main():
             print("Aborted.")
             return
 
-    # ── Delete files via API ──────────────────────────────────────────────────
-    token = mint_token(args.jwt_secret, args.user_id)
-    print(f"Deleting {len(files)} file(s) via API...", end=" ", flush=True)
-    files_ok = delete_files_via_api(files, token, args.url)
-    print("done." if files_ok else "failed (see above).")
+    # ── Delete files ──────────────────────────────────────────────────────────
+    print(f"Deleting {len(files)} file(s)...", end=" ", flush=True)
+    del_file_records, del_file_disk = delete_files_directly(db, files, args.uploads_path)
+    print("done.")
 
     # ── Delete DB records ─────────────────────────────────────────────────────
     print("Deleting DB records...", end=" ", flush=True)
@@ -187,14 +164,8 @@ def main():
     print("done.")
 
     # ── Summary ───────────────────────────────────────────────────────────────
-    print()
-    if files_ok:
-        print(f"✅  Deleted {del_conversations} conversation(s), "
-              f"{del_messages} message(s), {len(files)} file(s) via API.")
-    else:
-        print(f"⚠️  Partially completed: deleted {del_conversations} conversation(s) "
-              f"and {del_messages} message(s) from DB, but file deletion via API failed — "
-              f"{len(files)} file(s) may still exist on disk.")
+    print(f"\n✅  Deleted {del_conversations} conversation(s), {del_messages} message(s), "
+          f"{del_file_records} file record(s) from DB, {del_file_disk} file(s) from disk.")
 
 
 if __name__ == "__main__":

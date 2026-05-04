@@ -6,6 +6,6 @@ WORKDIR /app
 
 COPY librechat_purge.py .
 
-RUN uv pip install --system pymongo PyJWT requests
+RUN uv pip install --system pymongo
 
 ENTRYPOINT ["python", "librechat_purge.py"]
