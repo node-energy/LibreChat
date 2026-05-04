@@ -11,10 +11,23 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: purge
               image: nodeenergy.azurecr.io/librechat-purge:latest
               args: ["--delete", "--yes"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
               envFrom:
                 - secretRef:
                     name: librechat-credentials-env

@@ -2,7 +2,7 @@ name: Build & Push LibreChat Cleanup Image
 
 on:
   push:
-    branches: [main, test]
+    branches: [release, test]
     paths:
       - 'k8s/librechat-purge/**'
       - '.github/workflows/deploy-librechat-purge.yaml'
@@ -75,7 +75,7 @@ jobs:
         - name: Set Namespace
           id: set_namespace
           run: |
-            if [[ "${{ github.ref_name }}" == "main" ]]; then
+            if [[ "${{ github.ref_name }}" == "release" ]]; then
               echo "namespace=librechat"
               echo "namespace=librechat" >> $GITHUB_OUTPUT
             elif [[ "${{ github.ref_name }}" == "test" ]]; then
