@@ -15,7 +15,7 @@ def get_stale_conversations(db, days: int) -> list[dict]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     return list(db["conversations"].find(
         {"updatedAt": {"$lt": cutoff}},
-        {"_id": 1, "conversationId": 1, "title": 1, "user": 1,
+        {"_id": 1, "conversationId": 1, "user": 1,
          "createdAt": 1, "updatedAt": 1},
     ).sort("updatedAt", 1))
 
@@ -90,9 +90,7 @@ def format_datetime(dt) -> str:
 
 
 def print_table(convos: list[dict], show_ids: bool) -> None:
-    w = max((len(c.get("title") or "Untitled") for c in convos), default=30)
-    w = max(w, 30)
-    hdr = f"{'Last updated':<20}  {'Created':<20}  {'Title':<{w}}  {'User'}"
+    hdr = f"{'Last updated':<20}  {'Created':<20}  {'User'}"
     if show_ids:
         hdr += "  ConversationId"
     print(hdr)
@@ -100,7 +98,6 @@ def print_table(convos: list[dict], show_ids: bool) -> None:
     for c in convos:
         row = (f"{format_datetime(c.get('updatedAt')):<20}  "
                f"{format_datetime(c.get('createdAt')):<20}  "
-               f"{(c.get('title') or 'Untitled')[:w]:<{w}}  "
                f"{c.get('user', '')}")
         if show_ids:
             row += f"  {c.get('conversationId', '')}"
