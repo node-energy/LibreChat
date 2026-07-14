@@ -207,13 +207,13 @@ librechat:
             promptPrefix: |
               You are a helpful assistant.
 
-        - name: "claude-opus-4-6"
-          label: "claude-opus-4-6"
+        - name: "claude-opus-4-8"
+          label: "claude-opus-4-8"
           description: "Anthropic"
           preset:
-            endpoint: "claude-opus-4-6"
-            model: "claude-opus-4-6"
-            modelLabel: "Anthropic [claude-opus-4-6]"
+            endpoint: "claude-opus-4-8"
+            model: "claude-opus-4-8"
+            modelLabel: "Anthropic [claude-opus-4-8]"
             promptPrefix: |
               You are a helpful assistant.
 
