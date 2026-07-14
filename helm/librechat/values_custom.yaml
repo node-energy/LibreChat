@@ -82,13 +82,13 @@ librechat:
 #            default:
 #              - gpt-5-mini
 
-        - name: "claude-opus-4-6"
+        - name: "claude-opus-4-8"
           baseURL: "https://api.anthropic.com/v1/"
           apiKey: ${NE_ANTHROPIC_API_KEY}
           models:
             fetch: false
             default:
-              - claude-opus-4-6
+              - claude-opus-4-8
 
         - name: "claude-sonnet-4-6"
           baseURL: "https://api.anthropic.com/v1/"
