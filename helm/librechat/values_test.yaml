@@ -176,6 +176,28 @@ librechat:
             promptPrefix: |
               You are a helpful assistant.
 
+        - name: "gpt-5.6-terra"
+          label: "gpt-5.6-terra"
+          description: "Azure (Europe)"
+          default: true
+          preset:
+            endpoint: "gpt-5.6-terra-deployment"
+            model: "gpt-5.6-terra-deployment"
+            modelLabel: "Azure [gpt-5.6-terra]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.4-mini"
+          label: "gpt-5.4-mini"
+          description: "Azure (Europe)"
+          default: true
+          preset:
+            endpoint: "gpt-5.4-mini-deployment"
+            model: "gpt-5.4-mini-deployment"
+            modelLabel: "Azure [gpt-5.4-mini]"
+            promptPrefix: |
+              You are a helpful assistant.
+
         - name: "gpt-4.1-mini"
           label: "gpt-4.1-mini"
           description: "Azure (Europe)"
