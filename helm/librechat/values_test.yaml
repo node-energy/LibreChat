@@ -64,22 +64,6 @@ librechat:
 
     endpoints:
       custom:
-#        - name: "openai-gpt-5"
-#          baseURL: https://api.openai.com/v1
-#          apiKey: ${NE_OPENAI_API_KEY}
-#          models:
-#            fetch: true
-#            default:
-#              - gpt-5
-#
-#        - name: "openai-gpt-5-mini"
-#          baseURL: https://api.openai.com/v1
-#          apiKey: ${NE_OPENAI_API_KEY}
-#          models:
-#            fetch: true
-#            default:
-#              - gpt-5-mini
-
         - name: "claude-opus-4-6"
           baseURL: "https://api.anthropic.com/v1/"
           apiKey: ${NE_ANTHROPIC_API_KEY}
@@ -110,6 +94,24 @@ librechat:
           models:
             default:
               - gpt-4.1-deploy
+            fetch: false
+          directEndpoint: true
+
+        - name: "gpt-5.4-mini-deployment"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5.4-mini-deployment/chat/completions?api-version=2024-12-01-preview"
+          models:
+            default:
+              - gpt-5.4-mini-deployment
+            fetch: false
+          directEndpoint: true
+
+        - name: "gpt-5.6-terra-deployment"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5.6-terra-deployment/chat/completions?api-version=2024-12-01-preview"
+          models:
+            default:
+              - gpt-5.6-terra-deployment
             fetch: false
           directEndpoint: true
 
