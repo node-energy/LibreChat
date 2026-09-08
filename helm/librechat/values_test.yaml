@@ -115,6 +115,15 @@ librechat:
             fetch: false
           directEndpoint: true
 
+        - name: "gpt-5.6-sol-deployment"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5.6-sol-deployment/chat/completions?api-version=2024-12-01-preview"
+          models:
+            default:
+              - gpt-5.6-sol-deployment
+            fetch: false
+          directEndpoint: true
+
         - name: "gpt-4.1-mini-deploy"
           apiKey: "${NE_AZURE_OPENAI_API_KEY}"
           baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-mini-deployment/chat/completions?api-version=2025-01-01-preview"
@@ -195,6 +204,17 @@ librechat:
             endpoint: "gpt-5.4-mini-deployment"
             model: "gpt-5.4-mini-deployment"
             modelLabel: "Azure [gpt-5.4-mini]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.6-sol"
+          label: "gpt-5.6-sol"
+          description: "Azure (Europe)"
+          default: true
+          preset:
+            endpoint: "gpt-5.6-sol-deployment"
+            model: "gpt-5.6-sol-deployment"
+            modelLabel: "Azure [gpt-5.6-sol]"
             promptPrefix: |
               You are a helpful assistant.
 
