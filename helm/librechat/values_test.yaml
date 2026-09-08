@@ -164,16 +164,6 @@ librechat:
 
     modelSpecs:
       list:
-        - name: "mistral"
-          label: "mistral"
-          description: "mistral (Europe)"
-          preset:
-            endpoint: "mistral"
-            model: "mistral-large-latest"
-            modelLabel: "mistral-large"
-            promptPrefix: |
-              You are a helpful assistant.
-
         - name: "gpt-4.1"
           label: "gpt-4.1"
           description: "Azure (Europe)"
@@ -185,57 +175,13 @@ librechat:
             promptPrefix: |
               You are a helpful assistant.
 
-        - name: "gpt-5.6-terra"
-          label: "gpt-5.6-terra"
-          description: "Azure (Europe)"
-          default: true
-          preset:
-            endpoint: "gpt-5.6-terra-deployment"
-            model: "gpt-5.6-terra-deployment"
-            modelLabel: "Azure [gpt-5.6-terra]"
-            promptPrefix: |
-              You are a helpful assistant.
-
-        - name: "gpt-5.4-mini"
-          label: "gpt-5.4-mini"
-          description: "Azure (Europe)"
-          default: true
-          preset:
-            endpoint: "gpt-5.4-mini-deployment"
-            model: "gpt-5.4-mini-deployment"
-            modelLabel: "Azure [gpt-5.4-mini]"
-            promptPrefix: |
-              You are a helpful assistant.
-
-        - name: "gpt-5.6-sol"
-          label: "gpt-5.6-sol"
-          description: "Azure (Europe)"
-          default: true
-          preset:
-            endpoint: "gpt-5.6-sol-deployment"
-            model: "gpt-5.6-sol-deployment"
-            modelLabel: "Azure [gpt-5.6-sol]"
-            promptPrefix: |
-              You are a helpful assistant.
-
         - name: "gpt-4.1-mini"
           label: "gpt-4.1-mini"
           description: "Azure (Europe)"
-          default: true
           preset:
             endpoint: "gpt-4.1-mini-deploy"
             model: "gpt-4.1-mini-deploy"
             modelLabel: "Azure [gpt-4.1-mini]"
-            promptPrefix: |
-              You are a helpful assistant.
-
-        - name: "gpt-5-mini-deploy"
-          label: "gpt-5-mini"
-          description: "Azure (Europe)"
-          preset:
-            endpoint: "gpt-5-mini-deploy"
-            model: "gpt-5-mini-deploy"
-            modelLabel: "Azure [gpt-5-mini]"
             promptPrefix: |
               You are a helpful assistant.
 
@@ -249,13 +195,43 @@ librechat:
             promptPrefix: |
               You are a helpful assistant.
 
-        - name: "claude-opus-4-6"
-          label: "claude-opus-4-6"
-          description: "Anthropic"
+        - name: "gpt-5.4-mini"
+          label: "gpt-5.4-mini"
+          description: "Azure (Europe)"
           preset:
-            endpoint: "claude-opus-4-6"
-            model: "claude-opus-4-6"
-            modelLabel: "Anthropic [claude-opus-4-6]"
+            endpoint: "gpt-5.4-mini-deployment"
+            model: "gpt-5.4-mini-deployment"
+            modelLabel: "Azure [gpt-5.4-mini]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.6-terra"
+          label: "gpt-5.6-terra"
+          description: "Azure (Europe)"
+          preset:
+            endpoint: "gpt-5.6-terra-deployment"
+            model: "gpt-5.6-terra-deployment"
+            modelLabel: "Azure [gpt-5.6-terra]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.6-sol"
+          label: "gpt-5.6-sol"
+          description: "Azure (Europe)"
+          preset:
+            endpoint: "gpt-5.6-sol-deployment"
+            model: "gpt-5.6-sol-deployment"
+            modelLabel: "Azure [gpt-5.6-sol]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "mistral"
+          label: "mistral"
+          description: "mistral (Europe)"
+          preset:
+            endpoint: "mistral"
+            model: "mistral-large-latest"
+            modelLabel: "mistral-large"
             promptPrefix: |
               You are a helpful assistant.
 
@@ -272,11 +248,20 @@ librechat:
         - name: "claude-haiku-4-5-20251001"
           label: "claude-haiku-4-5"
           description: "Anthropic"
-          default: true
           preset:
             endpoint: "claude-haiku-4-5-20251001"
             model: "claude-haiku-4-5-20251001"
             modelLabel: "Anthropic [claude-haiku-4-5]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "claude-opus-4-6"
+          label: "claude-opus-4-6"
+          description: "Anthropic"
+          preset:
+            endpoint: "claude-opus-4-6"
+            model: "claude-opus-4-6"
+            modelLabel: "Anthropic [claude-opus-4-6]"
             promptPrefix: |
               You are a helpful assistant.
 
