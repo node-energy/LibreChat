@@ -115,6 +115,24 @@ librechat:
             fetch: false
           directEndpoint: true
 
+        - name: "gpt-5.4-mini-deployment"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5.4-mini-deployment/chat/completions?api-version=2024-12-01-preview"
+          models:
+            default:
+              - gpt-5.4-mini-deployment
+            fetch: false
+          directEndpoint: true
+
+        - name: "gpt-5.6-terra-deployment"
+          apiKey: "${NE_AZURE_OPENAI_API_KEY}"
+          baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-5.6-terra-deployment/chat/completions?api-version=2024-12-01-preview"
+          models:
+            default:
+              - gpt-5.6-terra-deployment
+            fetch: false
+          directEndpoint: true
+
         - name: "gpt-4.1-mini-deploy"
           apiKey: "${NE_AZURE_OPENAI_API_KEY}"
           baseURL: "https://nodeenergy.openai.azure.com/openai/deployments/gpt-4.1-mini-deployment/chat/completions?api-version=2025-01-01-preview"
@@ -163,6 +181,28 @@ librechat:
             endpoint: "gpt-4.1-deploy"
             model: "gpt-4.1-deploy"
             modelLabel: "Azure [gpt-4.1]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.6-terra"
+          label: "gpt-5.6-terra"
+          description: "Azure (Europe)"
+          default: true
+          preset:
+            endpoint: "gpt-5.6-terra-deployment"
+            model: "gpt-5.6-terra-deployment"
+            modelLabel: "Azure [gpt-5.6-terra]"
+            promptPrefix: |
+              You are a helpful assistant.
+
+        - name: "gpt-5.4-mini"
+          label: "gpt-5.4-mini"
+          description: "Azure (Europe)"
+          default: true
+          preset:
+            endpoint: "gpt-5.4-mini-deployment"
+            model: "gpt-5.4-mini-deployment"
+            modelLabel: "Azure [gpt-5.4-mini]"
             promptPrefix: |
               You are a helpful assistant.
 
