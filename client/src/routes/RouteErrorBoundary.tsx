@@ -1,6 +1,10 @@
-/* eslint-disable i18next/no-literal-string */
+import { useEffect } from 'react';
 import { Button } from '@librechat/client';
 import { useRouteError } from 'react-router-dom';
+import { onClientLogsStarted, reportBoundaryError } from '~/lib/rum/logs';
+import useStaleAssetRecovery from '~/lib/assets/useRecovery';
+import { isChunkLoadError } from '~/lib/assets/recovery';
+import Updating from '~/components/System/Updating';
 import { useLocalize } from '~/hooks';
 import logger from '~/utils/logger';
 
@@ -73,13 +77,21 @@ const getBrowserInfo = async () => {
 
 export default function RouteErrorBoundary() {
   const localize = useLocalize();
-  const typedError = useRouteError() as {
+  const routeError = useRouteError();
+  const updating = useStaleAssetRecovery(routeError);
+  const typedError = (routeError ?? {}) as {
     message?: string;
     stack?: string;
     status?: number;
     statusText?: string;
     data?: unknown;
   };
+
+  useEffect(() => {
+    const report = () => reportBoundaryError('route', routeError, isChunkLoadError(routeError));
+    report();
+    return onClientLogsStarted(report);
+  }, [routeError]);
 
   const errorDetails = {
     message: typedError.message ?? 'An unexpected error occurred',
@@ -125,20 +137,24 @@ export default function RouteErrorBoundary() {
     }
   };
 
+  if (updating) {
+    return <Updating />;
+  }
+
   return (
     <div
       role="alert"
-      className="flex min-h-screen flex-col items-center justify-center bg-surface-primary bg-gradient-to-br"
+      className="bg-surface-primary flex min-h-screen flex-col items-center justify-center bg-gradient-to-br"
     >
-      <div className="bg-surface-primary/60 mx-4 w-11/12 max-w-4xl rounded-2xl border border-border-light p-8 shadow-2xl backdrop-blur-xl">
-        <h2 className="mb-6 text-center text-3xl font-medium tracking-tight text-text-primary">
-          Oops! Something Unexpected Occurred
+      <div className="border-border-light bg-surface-primary/60 mx-4 w-11/12 max-w-4xl rounded-2xl border p-8 shadow-2xl backdrop-blur-xl">
+        <h2 className="text-text-primary mb-6 text-center text-3xl font-medium tracking-tight">
+          {localize('com_ui_error_unexpected')}
         </h2>
 
         {/* Error Message */}
-        <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-gray-600 dark:text-gray-200">
-          <h3 className="mb-2 font-medium">Error Message:</h3>
-          <pre className="whitespace-pre-wrap text-sm font-light leading-relaxed text-text-primary">
+        <div className="border-status-error-border bg-status-error-subtle text-text-secondary mb-4 rounded-xl border p-4 text-sm">
+          <h3 className="mb-2 font-medium">{localize('com_ui_error_message_prefix')}</h3>
+          <pre className="text-text-primary text-sm leading-relaxed font-light whitespace-pre-wrap">
             {errorDetails.message}
           </pre>
         </div>
@@ -146,8 +162,8 @@ export default function RouteErrorBoundary() {
         {/* Status Information */}
         {(typeof errorDetails.status === 'number' ||
           typeof errorDetails.statusText === 'string') && (
-          <div className="mb-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4 text-sm text-text-primary">
-            <h3 className="mb-2 font-medium">Status:</h3>
+          <div className="border-status-warning-border bg-status-warning-subtle text-text-primary mb-4 rounded-xl border p-4 text-sm">
+            <h3 className="mb-2 font-medium">{localize('com_ui_status_prefix')}:</h3>
             <p className="text-text-primary">
               {typeof errorDetails.status === 'number' && `${errorDetails.status} `}
               {typeof errorDetails.statusText === 'string' && errorDetails.statusText}
@@ -157,9 +173,9 @@ export default function RouteErrorBoundary() {
 
         {/* Stack Trace - Collapsible */}
         {errorDetails.stack != null && errorDetails.stack.trim() !== '' && (
-          <details className="group mb-4 rounded-xl border border-border-light p-4">
-            <summary className="mb-2 flex cursor-pointer items-center justify-between text-sm font-medium text-text-primary">
-              <span>Stack Trace</span>
+          <details className="group border-border-light mb-4 rounded-xl border p-4">
+            <summary className="text-text-primary mb-2 flex cursor-pointer items-center justify-between text-sm font-medium">
+              <span>{localize('com_ui_stack_trace')}</span>
               <div className="flex items-center">
                 <Button
                   variant="outline"
@@ -168,17 +184,17 @@ export default function RouteErrorBoundary() {
                   className="ml-2 px-2 py-1 text-xs"
                   aria-label={localize('com_ui_copy_stack_trace')}
                 >
-                  Copy
+                  {localize('com_ui_copy')}
                 </Button>
               </div>
             </summary>
-            <div className="overflow-x-auto rounded-lg bg-black/5 p-4 dark:bg-white/5">
+            <div className="bg-surface-tertiary overflow-x-auto rounded-lg p-4">
               {formatStackTrace(errorDetails.stack).map(({ number, content }) => (
                 <div key={number} className="flex">
-                  <span className="select-none pr-4 font-mono text-xs text-text-secondary">
+                  <span className="text-text-secondary pr-4 font-mono text-xs select-none">
                     {String(number).padStart(3, '0')}
                   </span>
-                  <pre className="flex-1 font-mono text-xs leading-relaxed text-text-primary">
+                  <pre className="text-text-primary flex-1 font-mono text-xs leading-relaxed">
                     {content}
                   </pre>
                 </div>
@@ -189,24 +205,26 @@ export default function RouteErrorBoundary() {
 
         {/* Additional Error Data */}
         {errorDetails.data != null && (
-          <details className="group mb-4 rounded-xl border border-border-light p-4">
-            <summary className="mb-2 flex cursor-pointer items-center justify-between text-sm font-medium text-text-primary">
-              <span>Additional Details</span>
+          <details className="group border-border-light mb-4 rounded-xl border p-4">
+            <summary className="text-text-primary mb-2 flex cursor-pointer items-center justify-between text-sm font-medium">
+              <span>{localize('com_ui_additional_details')}</span>
               <span className="transition-transform group-open:rotate-90">{'>'}</span>
             </summary>
-            <pre className="whitespace-pre-wrap text-xs font-light leading-relaxed text-text-primary">
+            <pre className="text-text-primary text-xs leading-relaxed font-light whitespace-pre-wrap">
               {JSON.stringify(errorDetails.data, null, 2)}
             </pre>
           </details>
         )}
 
         <div className="mt-6 flex flex-col gap-4">
-          <p className="text-sm font-light text-text-secondary">Please try one of the following:</p>
-          <ul className="list-inside list-disc text-sm text-text-secondary">
-            <li>Refresh the page</li>
-            <li>Clear your browser cache</li>
-            <li>Check your internet connection</li>
-            <li>Contact the Admin if the issue persists</li>
+          <p className="text-text-secondary text-sm font-light">
+            {localize('com_ui_error_try_following_prefix')}:
+          </p>
+          <ul className="text-text-secondary list-inside list-disc text-sm">
+            <li>{localize('com_ui_refresh_page')}</li>
+            <li>{localize('com_ui_clear_browser_cache')}</li>
+            <li>{localize('com_ui_check_internet')}</li>
+            <li>{localize('com_ui_contact_admin_if_issue_persists')}</li>
           </ul>
           <div className="mt-4 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Button

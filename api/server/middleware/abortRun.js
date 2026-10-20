@@ -1,10 +1,9 @@
-const { sendEvent } = require('@librechat/api');
+const { sendEvent, getTransactionsConfig } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 const { CacheKeys, RunStatus, isUUID } = require('librechat-data-provider');
 const { initializeClient } = require('~/server/services/Endpoints/assistants');
 const { checkMessageGaps, recordUsage } = require('~/server/services/Threads');
-const { deleteMessages } = require('~/models/Message');
-const { getConvo } = require('~/models/Conversation');
+const { deleteMessages, getConvo } = require('~/models');
 const getLogStores = require('~/cache/getLogStores');
 
 const three_minutes = 1000 * 60 * 3;
@@ -16,6 +15,7 @@ async function abortRun(req, res) {
   const conversation = await getConvo(req.user.id, conversationId);
 
   if (conversation?.model) {
+    req.body = req.body || {}; // Express 5: ensure req.body exists
     req.body.model = conversation.model;
   }
 
@@ -66,6 +66,7 @@ async function abortRun(req, res) {
       model: run.model,
       user: req.user.id,
       conversationId,
+      transactions: getTransactionsConfig(req.config),
     });
   } catch (error) {
     logger.error('[abortRun] Error fetching or processing run', error);

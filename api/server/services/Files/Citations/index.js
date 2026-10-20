@@ -1,6 +1,7 @@
 const { nanoid } = require('nanoid');
 const { checkAccess } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
+const { applyCitationLimits, selectFileCitationSources } = require('@librechat/api');
 const {
   Tools,
   Permissions,
@@ -8,8 +9,7 @@ const {
   EModelEndpoint,
   PermissionTypes,
 } = require('librechat-data-provider');
-const { getRoleByName } = require('~/models/Role');
-const { Files } = require('~/models');
+const { getRoleByName, getFiles } = require('~/models');
 
 /**
  * Process file search results from tool calls
@@ -48,26 +48,22 @@ async function processFileCitations({ user, appConfig, toolArtifact, toolCallId,
         logger.error(
           `[processFileCitations] Permission check failed for FILE_CITATIONS: ${error.message}`,
         );
-        logger.debug(`[processFileCitations] Proceeding with citations due to permission error`);
+        logger.warn(
+          '[processFileCitations] Returning null citations due to permission check error — citations will not be shown for this message',
+        );
+        return null;
       }
     }
 
-    const maxCitations = appConfig.endpoints?.[EModelEndpoint.agents]?.maxCitations ?? 30;
-    const maxCitationsPerFile =
-      appConfig.endpoints?.[EModelEndpoint.agents]?.maxCitationsPerFile ?? 5;
-    const minRelevanceScore =
-      appConfig.endpoints?.[EModelEndpoint.agents]?.minRelevanceScore ?? 0.45;
-
-    const sources = toolArtifact[Tools.file_search].sources || [];
-    const filteredSources = sources.filter((source) => source.relevance >= minRelevanceScore);
-    if (filteredSources.length === 0) {
-      logger.debug(
-        `[processFileCitations] No sources above relevance threshold of ${minRelevanceScore}`,
-      );
+    const selectedSources = selectFileCitationSources(toolArtifact[Tools.file_search].sources, {
+      maxCitations: appConfig.endpoints?.[EModelEndpoint.agents]?.maxCitations,
+      maxCitationsPerFile: appConfig.endpoints?.[EModelEndpoint.agents]?.maxCitationsPerFile,
+      minRelevanceScore: appConfig.endpoints?.[EModelEndpoint.agents]?.minRelevanceScore,
+    });
+    if (selectedSources.length === 0) {
       return null;
     }
 
-    const selectedSources = applyCitationLimits(filteredSources, maxCitations, maxCitationsPerFile);
     const enhancedSources = await enhanceSourcesWithMetadata(selectedSources, appConfig);
 
     if (enhancedSources.length > 0) {
@@ -91,32 +87,6 @@ async function processFileCitations({ user, appConfig, toolArtifact, toolCallId,
 }
 
 /**
- * Apply citation limits to sources
- * @param {Array} sources - All sources
- * @param {number} maxCitations - Maximum total citations
- * @param {number} maxCitationsPerFile - Maximum citations per file
- * @returns {Array} Selected sources
- */
-function applyCitationLimits(sources, maxCitations, maxCitationsPerFile) {
-  const byFile = {};
-  sources.forEach((source) => {
-    if (!byFile[source.fileId]) {
-      byFile[source.fileId] = [];
-    }
-    byFile[source.fileId].push(source);
-  });
-
-  const representatives = [];
-  for (const fileId in byFile) {
-    const fileSources = byFile[fileId].sort((a, b) => b.relevance - a.relevance);
-    const selectedFromFile = fileSources.slice(0, maxCitationsPerFile);
-    representatives.push(...selectedFromFile);
-  }
-
-  return representatives.sort((a, b) => b.relevance - a.relevance).slice(0, maxCitations);
-}
-
-/**
  * Enhance sources with file metadata from database
  * @param {Array} sources - Selected sources
  * @param {AppConfig} appConfig - Custom configuration
@@ -127,7 +97,7 @@ async function enhanceSourcesWithMetadata(sources, appConfig) {
 
   let fileMetadataMap = {};
   try {
-    const files = await Files.find({ file_id: { $in: fileIds } });
+    const files = await getFiles({ file_id: { $in: fileIds } });
     fileMetadataMap = files.reduce((map, file) => {
       map[file.file_id] = file;
       return map;
@@ -146,12 +116,15 @@ async function enhanceSourcesWithMetadata(sources, appConfig) {
       metadata: {
         ...source.metadata,
         storageType: configuredStorageType,
+        fileType: fileRecord.type || undefined,
+        fileBytes: fileRecord.bytes || undefined,
       },
     };
   });
 }
 
 module.exports = {
+  selectFileCitationSources,
   applyCitationLimits,
   processFileCitations,
   enhanceSourcesWithMetadata,

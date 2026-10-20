@@ -3,11 +3,11 @@ import { URL } from 'url';
 import _axios from 'axios';
 import crypto from 'crypto';
 import { load } from 'js-yaml';
-import type { ActionMetadata, ActionMetadataRuntime } from './types/agents';
-import type { FunctionTool, Schema, Reference } from './types/assistants';
-import { AuthTypeEnum, AuthorizationTypeEnum } from './types/agents';
 import type { OpenAPIV3 } from 'openapi-types';
-import { Tools } from './types/assistants';
+import type { ActionMetadata, ActionMetadataRuntime } from './types/agents';
+import type { FunctionTool, Schema, Reference } from './types/tools';
+import { AuthTypeEnum, AuthorizationTypeEnum } from './types/agents';
+import { Tools } from './types/tools';
 
 export type ParametersSchema = {
   type: string;
@@ -283,14 +283,33 @@ class RequestExecutor {
     return this;
   }
 
-  async execute() {
+  async execute(options?: { httpAgent?: unknown; httpsAgent?: unknown }) {
     const url = createURL(this.config.domain, this.path);
     const headers: Record<string, string> = {
       ...this.authHeaders,
       ...(this.config.contentType ? { 'Content-Type': this.config.contentType } : {}),
     };
     const method = this.config.method.toLowerCase();
-    const axios = _axios.create();
+
+    /**
+     * SECURITY: Disable automatic redirects to prevent SSRF bypass.
+     * Attackers could use redirects to access internal services:
+     *   1. Set action URL to allowed external domain
+     *   2. External domain redirects to internal service (e.g., 127.0.0.1, rag_api)
+     *   3. Without this protection, axios would follow the redirect
+     *
+     * By setting maxRedirects: 0, we prevent this attack vector.
+     * The action will receive the redirect response (3xx) instead of following it.
+     *
+     * SECURITY: When httpAgent/httpsAgent are provided (SSRF-safe agents), they validate
+     * the DNS-resolved IP at TCP connect time, preventing TOCTOU DNS rebinding attacks.
+     */
+    const axios = _axios.create({
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
+      ...(options?.httpAgent != null ? { httpAgent: options.httpAgent } : {}),
+      ...(options?.httpsAgent != null ? { httpsAgent: options.httpsAgent } : {}),
+    });
 
     // Initialize separate containers for query and body parameters.
     const queryParams: Record<string, unknown> = {};
@@ -617,6 +636,45 @@ export type DomainValidationResult = {
   normalizedClientDomain?: string;
 };
 
+function getExplicitPort(value: string): string | null {
+  const normalizedValue = value.trim();
+  const protocolSeparatorIndex = normalizedValue.indexOf('://');
+  const hasProtocol = protocolSeparatorIndex !== -1;
+  const authorityAndPath = hasProtocol
+    ? normalizedValue.slice(protocolSeparatorIndex + 3)
+    : normalizedValue;
+
+  let port: string;
+  try {
+    const parsedUrl = new URL(hasProtocol ? normalizedValue : `https://${normalizedValue}`);
+    port = parsedUrl.port;
+
+    // WHATWG URL parsing removes explicit default ports, so parse the same authority with
+    // the alternate HTTP scheme to distinguish an explicit port from an omitted one.
+    if (!port && (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:')) {
+      const alternateProtocol = parsedUrl.protocol === 'http:' ? 'https:' : 'http:';
+      port = new URL(`${alternateProtocol}//${authorityAndPath}`).port;
+    }
+  } catch {
+    return null;
+  }
+
+  if (!port) {
+    return null;
+  }
+
+  const parsedPort = Number(port);
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+    throw new Error(`Invalid port in domain: ${value}`);
+  }
+
+  return String(parsedPort);
+}
+
+function getDefaultActionPort(protocol: string): string {
+  return protocol === 'https:' ? '443' : '80';
+}
+
 /**
  * Validates client domain matches OpenAPI spec server URL domain (SSRF prevention).
  * @param clientProvidedDomain - Domain from client (with/without protocol)
@@ -650,6 +708,7 @@ export function validateActionDomain(
     /** Extract hostname from client domain if it's a full URL */
     let clientHostname = clientProvidedDomain;
     let clientHasProtocol = false;
+    const clientExplicitPort = getExplicitPort(clientProvidedDomain);
 
     // Check for any protocol in the client domain
     if (clientProvidedDomain.includes('://')) {
@@ -670,6 +729,9 @@ export function validateActionDomain(
         // If parsing fails, treat as hostname
         clientHasProtocol = false;
       }
+    } else if (clientExplicitPort !== null) {
+      const clientUrl = new URL(`https://${clientProvidedDomain}`);
+      clientHostname = clientUrl.hostname;
     }
 
     /** Normalize IPv6 addresses by removing brackets for comparison */
@@ -684,9 +746,9 @@ export function validateActionDomain(
     if (clientHasProtocol) {
       normalizedClientDomain = extractDomainFromUrl(clientProvidedDomain);
     } else {
-      // IP addresses inherit protocol from spec, domains default to https
+      // No protocol specified by client
       if (isIPAddress) {
-        // IPv6 addresses need brackets in URLs
+        // IPs inherit protocol from spec (for legitimate internal services)
         const ipVersion = isIP(normalizedClientHostname);
         const hostname =
           ipVersion === 6 && !clientHostname.startsWith('[')
@@ -694,24 +756,38 @@ export function validateActionDomain(
             : clientHostname;
         normalizedClientDomain = `${specUrl.protocol}//${hostname}`;
       } else {
+        // Domain names default to HTTPS for security (forces explicit protocol)
         normalizedClientDomain = `https://${clientHostname}`;
       }
     }
 
-    if (
+    const domainMatches =
       normalizedSpecDomain === normalizedClientDomain ||
-      (!clientHasProtocol && isIPAddress && normalizedClientHostname === normalizedSpecHostname)
-    ) {
+      (!clientHasProtocol && isIPAddress && normalizedClientHostname === normalizedSpecHostname);
+
+    if (!domainMatches) {
       return {
-        isValid: true,
+        isValid: false,
+        message: `Domain mismatch: Client provided '${clientProvidedDomain}', but spec uses '${specHostname}'`,
         normalizedSpecDomain,
         normalizedClientDomain,
       };
     }
 
+    if (clientExplicitPort !== null) {
+      const specEffectivePort = specUrl.port || getDefaultActionPort(specUrl.protocol);
+      if (clientExplicitPort !== specEffectivePort) {
+        return {
+          isValid: false,
+          message: `Port mismatch: Client provided '${clientProvidedDomain}', but spec uses effective port '${specEffectivePort}'`,
+          normalizedSpecDomain,
+          normalizedClientDomain,
+        };
+      }
+    }
+
     return {
-      isValid: false,
-      message: `Domain mismatch: Client provided '${clientProvidedDomain}', but spec uses '${specHostname}'`,
+      isValid: true,
       normalizedSpecDomain,
       normalizedClientDomain,
     };

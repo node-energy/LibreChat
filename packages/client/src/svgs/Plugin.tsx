@@ -1,6 +1,8 @@
+import { JSX } from 'react/jsx-runtime';
+import type { SVGProps } from 'react';
 import { cn } from '~/utils/';
 
-export default function Plugin({ className = '', ...props }) {
+export default function Plugin({ className = '', ...props }: SVGProps<SVGSVGElement>): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -10,6 +12,7 @@ export default function Plugin({ className = '', ...props }) {
       width="16"
       height="16"
       strokeWidth="2"
+      aria-hidden="true"
       {...props}
     >
       <g fill="currentColor">

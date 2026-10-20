@@ -1,6 +1,7 @@
 import React from 'react';
+import { JSX } from 'react/jsx-runtime';
 
-export default function ChatGPTMinimalIcon() {
+export default function ChatGPTMinimalIcon(): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -12,6 +13,7 @@ export default function ChatGPTMinimalIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       className="lucide lucide-bot"
+      aria-hidden="true"
     >
       <rect width="18" height="10" x="3" y="11" rx="2" />
       <circle cx="12" cy="5" r="2" />

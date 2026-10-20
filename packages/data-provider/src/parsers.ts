@@ -1,52 +1,73 @@
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc.js';
+import timezonePlugin from 'dayjs/plugin/timezone.js';
 import type { ZodIssue } from 'zod';
-import type * as a from './types/assistants';
+import type * as a from './types/content';
 import type * as s from './schemas';
 import type * as t from './types';
-import { ContentTypes } from './types/runs';
 import {
   openAISchema,
+  openRouterSchema,
   googleSchema,
   EModelEndpoint,
+  isAgentsEndpoint,
+  isAssistantsEndpoint,
+  Providers,
   anthropicSchema,
   assistantSchema,
-  gptPluginsSchema,
-  // agentsSchema,
   compactAgentsSchema,
   compactGoogleSchema,
-  compactPluginsSchema,
   compactAssistantSchema,
 } from './schemas';
 import { bedrockInputSchema } from './bedrock';
+import { ContentTypes } from './types/runs';
 import { alternateName } from './config';
+
+dayjs.extend(utc);
+dayjs.extend(timezonePlugin);
 
 type EndpointSchema =
   | typeof openAISchema
+  | typeof openRouterSchema
   | typeof googleSchema
   | typeof anthropicSchema
-  | typeof gptPluginsSchema
   | typeof assistantSchema
   | typeof compactAgentsSchema
   | typeof bedrockInputSchema;
 
-export type EndpointSchemaKey = Exclude<EModelEndpoint, EModelEndpoint.chatGPTBrowser>;
+export type EndpointSchemaKey = EModelEndpoint;
+type EndpointSchemaLookupKey = EModelEndpoint | Providers.OPENROUTER;
 
-const endpointSchemas: Record<EndpointSchemaKey, EndpointSchema> = {
+const endpointSchemas: Record<EndpointSchemaLookupKey, EndpointSchema> = {
   [EModelEndpoint.openAI]: openAISchema,
   [EModelEndpoint.azureOpenAI]: openAISchema,
   [EModelEndpoint.custom]: openAISchema,
+  [Providers.OPENROUTER]: openRouterSchema,
   [EModelEndpoint.google]: googleSchema,
   [EModelEndpoint.anthropic]: anthropicSchema,
-  [EModelEndpoint.gptPlugins]: gptPluginsSchema,
   [EModelEndpoint.assistants]: assistantSchema,
   [EModelEndpoint.azureAssistants]: assistantSchema,
   [EModelEndpoint.agents]: compactAgentsSchema,
   [EModelEndpoint.bedrock]: bedrockInputSchema,
 };
 
-// const schemaCreators: Record<EModelEndpoint, (customSchema: DefaultSchemaValues) => EndpointSchema> = {
-//   [EModelEndpoint.google]: createGoogleSchema,
-// };
+const isEndpointSchemaLookupKey = (value?: string | null): value is EndpointSchemaLookupKey =>
+  value != null && Object.prototype.hasOwnProperty.call(endpointSchemas, value);
+
+const getFallbackEndpointSchema = <TSchema>(
+  schemas: Record<EndpointSchemaLookupKey, TSchema>,
+  endpointType?: EndpointSchemaKey | null,
+  defaultParamsEndpoint?: string | null,
+): TSchema | undefined => {
+  if (!endpointType) {
+    return undefined;
+  }
+
+  const overrideSchema = isEndpointSchemaLookupKey(defaultParamsEndpoint)
+    ? schemas[defaultParamsEndpoint]
+    : undefined;
+  return overrideSchema ?? schemas[endpointType];
+};
 
 /** Get the enabled endpoints from the `ENDPOINTS` environment variable */
 export function getEnabledEndpoints() {
@@ -57,8 +78,6 @@ export function getEnabledEndpoints() {
     EModelEndpoint.azureAssistants,
     EModelEndpoint.azureOpenAI,
     EModelEndpoint.google,
-    EModelEndpoint.chatGPTBrowser,
-    EModelEndpoint.gptPlugins,
     EModelEndpoint.anthropic,
     EModelEndpoint.bedrock,
   ];
@@ -143,7 +162,6 @@ export function getNonEmptyValue(possibleValues: string[]) {
 
 export type TPossibleValues = {
   models: string[];
-  secondaryModels?: string[];
 };
 
 export const parseConvo = ({
@@ -151,35 +169,28 @@ export const parseConvo = ({
   endpointType,
   conversation,
   possibleValues,
+  defaultParamsEndpoint,
 }: {
   endpoint: EndpointSchemaKey;
   endpointType?: EndpointSchemaKey | null;
   conversation: Partial<s.TConversation | s.TPreset> | null;
   possibleValues?: TPossibleValues;
-  // TODO: POC for default schema
-  // defaultSchema?: Partial<EndpointSchema>,
+  defaultParamsEndpoint?: string | null;
 }) => {
-  let schema = endpointSchemas[endpoint] as EndpointSchema | undefined;
+  const primarySchema = endpointSchemas[endpoint] as EndpointSchema | undefined;
 
-  if (!schema && !endpointType) {
+  if (!primarySchema && !endpointType) {
     throw new Error(`Unknown endpoint: ${endpoint}`);
-  } else if (!schema && endpointType) {
-    schema = endpointSchemas[endpointType];
   }
 
-  // if (defaultSchema && schemaCreators[endpoint]) {
-  //   schema = schemaCreators[endpoint](defaultSchema);
-  // }
-
+  const schema =
+    primarySchema ??
+    getFallbackEndpointSchema(endpointSchemas, endpointType, defaultParamsEndpoint);
   const convo = schema?.parse(conversation) as s.TConversation | undefined;
-  const { models, secondaryModels } = possibleValues ?? {};
+  const { models } = possibleValues ?? {};
 
   if (models && convo) {
     convo.model = getFirstDefinedValue(models) ?? convo.model;
-  }
-
-  if (secondaryModels && convo?.agentOptions) {
-    convo.agentOptions.model = getFirstDefinedValue(secondaryModels) ?? convo.agentOptions.model;
   }
 
   return convo;
@@ -208,7 +219,7 @@ const extractOmniVersion = (modelStr: string): string => {
   return '';
 };
 
-export const getResponseSender = (endpointOption: t.TEndpointOption): string => {
+export const getResponseSender = (endpointOption: Partial<t.TEndpointOption>): string => {
   const {
     model: _m,
     endpoint: _e,
@@ -225,29 +236,28 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
   const chatGptLabel = _cgl ?? '';
   const modelLabel = _ml ?? '';
   if (
-    [
-      EModelEndpoint.openAI,
-      EModelEndpoint.bedrock,
-      EModelEndpoint.gptPlugins,
-      EModelEndpoint.azureOpenAI,
-      EModelEndpoint.chatGPTBrowser,
-    ].includes(endpoint)
+    [EModelEndpoint.openAI, EModelEndpoint.bedrock, EModelEndpoint.azureOpenAI].includes(endpoint)
   ) {
-    if (chatGptLabel) {
-      return chatGptLabel;
-    } else if (modelLabel) {
+    if (modelLabel) {
       return modelLabel;
+    } else if (chatGptLabel) {
+      // @deprecated - prefer modelLabel
+      return chatGptLabel;
     } else if (model && extractOmniVersion(model)) {
       return extractOmniVersion(model);
     } else if (model && (model.includes('mistral') || model.includes('codestral'))) {
       return 'Mistral';
     } else if (model && model.includes('deepseek')) {
       return 'Deepseek';
+    } else if (model && model.includes('kimi')) {
+      return 'Kimi';
+    } else if (model && model.includes('moonshot')) {
+      return 'Moonshot';
     } else if (model && model.includes('gpt-')) {
       const gptVersion = extractGPTVersion(model);
       return gptVersion || 'GPT';
     }
-    return (alternateName[endpoint] as string | undefined) ?? 'ChatGPT';
+    return (alternateName[endpoint] as string | undefined) ?? 'AI';
   }
 
   if (endpoint === EModelEndpoint.anthropic) {
@@ -272,6 +282,7 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
     if (modelLabel) {
       return modelLabel;
     } else if (chatGptLabel) {
+      // @deprecated - prefer modelLabel
       return chatGptLabel;
     } else if (model && extractOmniVersion(model)) {
       return extractOmniVersion(model);
@@ -279,6 +290,10 @@ export const getResponseSender = (endpointOption: t.TEndpointOption): string => 
       return 'Mistral';
     } else if (model && model.includes('deepseek')) {
       return 'Deepseek';
+    } else if (model && model.includes('kimi')) {
+      return 'Kimi';
+    } else if (model && model.includes('moonshot')) {
+      return 'Moonshot';
     } else if (model && model.includes('gpt-')) {
       const gptVersion = extractGPTVersion(model);
       return gptVersion || 'GPT';
@@ -297,21 +312,21 @@ type CompactEndpointSchema =
   | typeof compactAssistantSchema
   | typeof compactAgentsSchema
   | typeof compactGoogleSchema
+  | typeof openRouterSchema
   | typeof anthropicSchema
-  | typeof bedrockInputSchema
-  | typeof compactPluginsSchema;
+  | typeof bedrockInputSchema;
 
-const compactEndpointSchemas: Record<EndpointSchemaKey, CompactEndpointSchema> = {
+const compactEndpointSchemas: Record<EndpointSchemaLookupKey, CompactEndpointSchema> = {
   [EModelEndpoint.openAI]: openAISchema,
   [EModelEndpoint.azureOpenAI]: openAISchema,
   [EModelEndpoint.custom]: openAISchema,
+  [Providers.OPENROUTER]: openRouterSchema,
   [EModelEndpoint.assistants]: compactAssistantSchema,
   [EModelEndpoint.azureAssistants]: compactAssistantSchema,
   [EModelEndpoint.agents]: compactAgentsSchema,
   [EModelEndpoint.google]: compactGoogleSchema,
   [EModelEndpoint.bedrock]: bedrockInputSchema,
   [EModelEndpoint.anthropic]: anthropicSchema,
-  [EModelEndpoint.gptPlugins]: compactPluginsSchema,
 };
 
 export const parseCompactConvo = ({
@@ -319,25 +334,27 @@ export const parseCompactConvo = ({
   endpointType,
   conversation,
   possibleValues,
+  defaultParamsEndpoint,
 }: {
   endpoint?: EndpointSchemaKey;
   endpointType?: EndpointSchemaKey | null;
   conversation: Partial<s.TConversation | s.TPreset>;
   possibleValues?: TPossibleValues;
-  // TODO: POC for default schema
-  // defaultSchema?: Partial<EndpointSchema>,
+  defaultParamsEndpoint?: string | null;
 }): Omit<s.TConversation, 'iconURL'> | null => {
   if (!endpoint) {
     throw new Error(`undefined endpoint: ${endpoint}`);
   }
 
-  let schema = compactEndpointSchemas[endpoint] as CompactEndpointSchema | undefined;
+  const primarySchema = compactEndpointSchemas[endpoint] as CompactEndpointSchema | undefined;
 
-  if (!schema && !endpointType) {
+  if (!primarySchema && !endpointType) {
     throw new Error(`Unknown endpoint: ${endpoint}`);
-  } else if (!schema && endpointType) {
-    schema = compactEndpointSchemas[endpointType];
   }
+
+  const schema =
+    primarySchema ??
+    getFallbackEndpointSchema(compactEndpointSchemas, endpointType, defaultParamsEndpoint);
 
   if (!schema) {
     throw new Error(`Unknown endpointType: ${endpointType}`);
@@ -348,57 +365,84 @@ export const parseCompactConvo = ({
   const { iconURL: _clientIconURL, ...conversationWithoutIconURL } = conversation;
 
   const convo = schema.parse(conversationWithoutIconURL) as s.TConversation | null;
-  // const { models, secondaryModels } = possibleValues ?? {};
   const { models } = possibleValues ?? {};
 
   if (models && convo) {
     convo.model = getFirstDefinedValue(models) ?? convo.model;
   }
 
-  // if (secondaryModels && convo.agentOptions) {
-  //   convo.agentOptionmodel = getFirstDefinedValue(secondaryModels) ?? convo.agentOptionmodel;
-  // }
-
   return convo;
 };
 
 export function parseTextParts(
-  contentParts: a.TMessageContentParts[],
+  contentParts: Array<a.TMessageContentParts | undefined>,
   skipReasoning: boolean = false,
+  options?: { includeSteer?: boolean },
 ): string {
   let result = '';
+  const append = (textValue: string) => {
+    if (
+      result.length > 0 &&
+      textValue.length > 0 &&
+      result[result.length - 1] !== ' ' &&
+      textValue[0] !== ' '
+    ) {
+      result += ' ';
+    }
+    result += textValue;
+  };
 
   for (const part of contentParts) {
-    if (!part.type) {
+    if (!part?.type) {
       continue;
     }
     if (part.type === ContentTypes.TEXT) {
-      const textValue = (typeof part.text === 'string' ? part.text : part.text?.value) || '';
-
-      if (
-        result.length > 0 &&
-        textValue.length > 0 &&
-        result[result.length - 1] !== ' ' &&
-        textValue[0] !== ' '
-      ) {
-        result += ' ';
-      }
-      result += textValue;
+      append((typeof part.text === 'string' ? part.text : part.text?.value) || '');
+    } else if (part.type === ContentTypes.STEER && options?.includeSteer === true) {
+      /** Mid-run user speech: excluded by default so generic extraction (TTS
+       *  reading assistant output) never speaks the user's own words — the
+       *  full-record surfaces (search indexing, persisted abort text) opt in. */
+      append(typeof part.steer === 'string' ? part.steer : '');
     } else if (part.type === ContentTypes.THINK && !skipReasoning) {
-      const textValue = typeof part.think === 'string' ? part.think : '';
-      if (
-        result.length > 0 &&
-        textValue.length > 0 &&
-        result[result.length - 1] !== ' ' &&
-        textValue[0] !== ' '
-      ) {
-        result += ' ';
-      }
-      result += textValue;
+      append(typeof part.think === 'string' ? part.think : '');
     }
   }
 
   return result;
+}
+
+const thinkingBlockPattern = /:::thinking([\s\S]*?):::/;
+
+/**
+ * Splits legacy plain-text reasoning from the answer exactly as the message view renders it:
+ * the first `:::thinking ... :::` block becomes the collapsible Thoughts, the rest is the answer.
+ */
+export function parseThinkingContent(text: string): {
+  thinkingContent: string;
+  regularContent: string;
+} {
+  const thinkingMatch = text.match(thinkingBlockPattern);
+  return {
+    thinkingContent: thinkingMatch ? thinkingMatch[1].trim() : '',
+    regularContent: thinkingMatch ? text.replace(thinkingBlockPattern, '').trim() : text,
+  };
+}
+
+/**
+ * The text Read Aloud speaks for a message: the answer the message view shows, never its
+ * reasoning. Covers both reasoning shapes the UI collapses into Thoughts: `think` content parts
+ * and the legacy `:::thinking ... :::` block in plain text.
+ */
+export function getSpeechText(message: {
+  content?: Array<a.TMessageContentParts | undefined> | string | null;
+  text?: string | null;
+}): string {
+  if (Array.isArray(message.content) && message.content.length > 0) {
+    return parseTextParts(message.content, true).trim();
+  }
+  const text =
+    typeof message.content === 'string' && message.content ? message.content : message.text;
+  return parseThinkingContent(text ?? '').regularContent.trim();
 }
 
 export const SEPARATORS = ['.', '?', '!', '۔', '。', '‥', ';', '¡', '¿', '\n', '```'];
@@ -414,27 +458,268 @@ export function findLastSeparatorIndex(text: string, separators = SEPARATORS): n
   return lastIndex;
 }
 
-export function replaceSpecialVars({ text, user }: { text: string; user?: t.TUser | null }) {
+/**
+ * Anchors a dayjs instant to the user's IANA timezone when one is supplied,
+ * so local-time special vars reflect the user's wall clock rather than the
+ * server's. Falls back to the original instant for missing or invalid zones.
+ */
+function applyTimezone(value: dayjs.Dayjs, timezone?: string): dayjs.Dayjs {
+  if (!timezone) {
+    return value;
+  }
+  try {
+    const zoned = value.tz(timezone);
+    return zoned.isValid() ? zoned : value;
+  } catch {
+    return value;
+  }
+}
+
+export function replaceSpecialVars({
+  text,
+  user,
+  now: inputNow,
+  timezone,
+}: {
+  text: string;
+  user?: t.TUser | null;
+  now?: string | number | Date;
+  timezone?: string;
+}) {
   let result = text;
   if (!result) {
     return result;
   }
 
-  // e.g., "2024-04-29 (1)" (1=Monday)
-  const currentDate = dayjs().format('YYYY-MM-DD');
-  const dayNumber = dayjs().day();
-  const combinedDate = `${currentDate} (${dayNumber})`;
-  result = result.replace(/{{current_date}}/gi, combinedDate);
+  const now = applyTimezone(inputNow != null ? dayjs(inputNow) : dayjs(), timezone);
+  const weekdayName = now.format('dddd');
 
-  const currentDatetime = dayjs().format('YYYY-MM-DD HH:mm:ss');
-  result = result.replace(/{{current_datetime}}/gi, `${currentDatetime} (${dayNumber})`);
+  const currentDate = now.format('YYYY-MM-DD');
+  result = result.replace(/{{\s*current_date\s*}}/gi, `${currentDate} (${weekdayName})`);
 
-  const isoDatetime = dayjs().toISOString();
-  result = result.replace(/{{iso_datetime}}/gi, isoDatetime);
+  const currentDatetime = now.format('YYYY-MM-DD HH:mm:ss Z');
+  result = result.replace(/{{\s*current_datetime\s*}}/gi, `${currentDatetime} (${weekdayName})`);
+
+  const isoDatetime = now.toISOString();
+  result = result.replace(/{{\s*iso_datetime\s*}}/gi, isoDatetime);
 
   if (user && user.name) {
-    result = result.replace(/{{current_user}}/gi, user.name);
+    result = result.replace(/{{\s*current_user\s*}}/gi, user.name);
   }
 
   return result;
 }
+
+/**
+ * Parsed ephemeral agent ID result
+ */
+export type ParsedEphemeralAgentId = {
+  endpoint: string;
+  model: string;
+  sender?: string;
+  index?: number;
+};
+
+/**
+ * Resolves the display label ("sender") for an ephemeral agent:
+ * `modelLabel` (user/preset) → model spec's `label` → endpoint config's
+ * `modelDisplayLabel` → `''` (lets consumers fall back to the model name).
+ */
+export function getEphemeralSender({
+  modelLabel,
+  specLabel,
+  modelDisplayLabel,
+}: {
+  modelLabel?: string | null;
+  specLabel?: string | null;
+  modelDisplayLabel?: string | null;
+}): string {
+  return modelLabel ?? specLabel ?? modelDisplayLabel ?? '';
+}
+
+/** Built-in endpoints; anything else in `endpoint` is a custom endpoint's own name. */
+const builtInEndpoints = new Set<string>(Object.values(EModelEndpoint));
+
+/**
+ * Whether a persisted `sender` is a label someone configured rather than the
+ * model-derived name `getResponseSender` produces.
+ *
+ * The sender is the one thing that records which it was: `resolveSender` writes an
+ * agent's name, then the `getEphemeralSender` chain (`modelLabel` → a model spec's
+ * `label` → an endpoint's `modelDisplayLabel`), and falls back to `getResponseSender`
+ * only when none of those is set. Asking the message rather than the conversation
+ * settles three things a settings lookup cannot: labels that live in config a caller
+ * may not hold, labels an endpoint ignores (Anthropic keeps reading `Claude` whatever
+ * `chatGptLabel` says, and matches here), and labels changed since the message was
+ * written — its header still shows the sender it was written under.
+ *
+ * Equality is the test, so the only way to be wrong is a stored name that no longer
+ * matches what the current heuristics produce, which withholds a model rather than
+ * revealing one.
+ */
+export const isConfiguredSender = ({
+  sender,
+  endpoint,
+  endpointType,
+  model,
+  isCreatedByUser,
+}: {
+  sender?: string | null;
+  endpoint?: EModelEndpoint | string | null;
+  endpointType?: EModelEndpoint | string | null;
+  model?: string | null;
+  isCreatedByUser?: boolean | null;
+}): boolean => {
+  /** A user turn is headed by the person who wrote it, so it has no model to withhold
+   *  and its `User` sender would never match a derived name. */
+  if (isCreatedByUser === true) {
+    return false;
+  }
+  /** Agents and assistants are named by whoever authored them: the header shows that
+   *  name whether or not the response stored a sender, and `getResponseSender` has no
+   *  branch to derive one. */
+  if (isAgentsEndpoint(endpoint) || isAssistantsEndpoint(endpoint)) {
+    return true;
+  }
+  if (sender == null || sender === '') {
+    return false;
+  }
+  /** A custom endpoint carries its own configured name in `endpoint`, which
+   *  `getResponseSender` recognizes only through `endpointType`. */
+  const resolvedType =
+    endpointType ??
+    (endpoint != null && !builtInEndpoints.has(endpoint) ? EModelEndpoint.custom : undefined);
+  const derived = getResponseSender({
+    endpoint: endpoint as EModelEndpoint,
+    endpointType: resolvedType as EModelEndpoint,
+    model,
+  });
+  /** An endpoint this cannot name — an older message stored without one, say — says
+   *  nothing either way, and reading that silence as "configured" would withhold the
+   *  model from every unlabelled row it reached. */
+  if (derived === '') {
+    return false;
+  }
+  return sender !== derived;
+};
+
+/**
+ * Encodes an ephemeral agent ID from endpoint, model, optional sender, and optional index.
+ * Uses __ to replace : (reserved in graph node names) and ___ to separate sender.
+ *
+ * Format: endpoint__model___sender or endpoint__model___sender____index (if index provided)
+ *
+ * @example
+ * encodeEphemeralAgentId({ endpoint: 'openAI', model: 'gpt-4o', sender: 'GPT-4o' })
+ * // => 'openAI__gpt-4o___GPT-4o'
+ *
+ * @example
+ * encodeEphemeralAgentId({ endpoint: 'openAI', model: 'gpt-4o', sender: 'GPT-4o', index: 1 })
+ * // => 'openAI__gpt-4o___GPT-4o____1'
+ */
+export function encodeEphemeralAgentId({
+  endpoint,
+  model,
+  sender,
+  index,
+}: {
+  endpoint: string;
+  model: string;
+  sender?: string;
+  index?: number;
+}): string {
+  const base = `${endpoint}:${model}`.replace(/:/g, '__');
+  let result = base;
+  if (sender) {
+    // Use ___ as separator before sender to distinguish from __ in model names
+    result = `${base}___${sender.replace(/:/g, '__')}`;
+  }
+  if (index != null) {
+    // Use ____ (4 underscores) as separator for index
+    result = `${result}____${index}`;
+  }
+  return result;
+}
+
+/**
+ * Parses an ephemeral agent ID back into its components.
+ * Returns undefined if the ID doesn't match the expected format.
+ *
+ * Format: endpoint__model___sender or endpoint__model___sender____index
+ * - ____ (4 underscores) separates optional index suffix
+ * - ___ (triple underscore) separates model from optional sender
+ * - __ (double underscore) replaces : in endpoint/model names
+ *
+ * @example
+ * parseEphemeralAgentId('openAI__gpt-4o___GPT-4o')
+ * // => { endpoint: 'openAI', model: 'gpt-4o', sender: 'GPT-4o' }
+ *
+ * @example
+ * parseEphemeralAgentId('openAI__gpt-4o___GPT-4o____1')
+ * // => { endpoint: 'openAI', model: 'gpt-4o', sender: 'GPT-4o', index: 1 }
+ */
+export function parseEphemeralAgentId(agentId: string): ParsedEphemeralAgentId | undefined {
+  if (!agentId.includes('__')) {
+    return undefined;
+  }
+
+  // First check for index suffix (separated by ____)
+  let index: number | undefined;
+  let workingId = agentId;
+  if (agentId.includes('____')) {
+    const lastIndexSep = agentId.lastIndexOf('____');
+    const indexStr = agentId.slice(lastIndexSep + 4);
+    const parsedIndex = parseInt(indexStr, 10);
+    if (!isNaN(parsedIndex)) {
+      index = parsedIndex;
+      workingId = agentId.slice(0, lastIndexSep);
+    }
+  }
+
+  // Check for sender (separated by ___)
+  let sender: string | undefined;
+  let mainPart = workingId;
+  if (workingId.includes('___')) {
+    const [before, after] = workingId.split('___');
+    mainPart = before;
+    // Restore colons in sender if any
+    sender = after?.replace(/__/g, ':');
+  }
+
+  const [endpoint, ...modelParts] = mainPart.split('__');
+  if (!endpoint || modelParts.length === 0) {
+    return undefined;
+  }
+  // Restore colons in model name (model names can contain colons like claude-3:opus)
+  const model = modelParts.join(':');
+  return { endpoint, model, sender, index };
+}
+
+/**
+ * Checks if an agent ID represents an ephemeral (non-saved) agent.
+ * Real agent IDs always start with "agent_", so anything else is ephemeral.
+ */
+export function isEphemeralAgentId(agentId: string | null | undefined): boolean {
+  return !agentId?.startsWith('agent_');
+}
+
+/**
+ * Strips the index suffix (____N) from an agent ID if present.
+ * Works with both ephemeral and real agent IDs.
+ *
+ * @example
+ * stripAgentIdSuffix('agent_abc123____1') // => 'agent_abc123'
+ * stripAgentIdSuffix('openAI__gpt-4o___GPT-4o____1') // => 'openAI__gpt-4o___GPT-4o'
+ * stripAgentIdSuffix('agent_abc123') // => 'agent_abc123' (unchanged)
+ */
+export { stripAgentIdSuffix } from './agents/identity';
+
+/**
+ * Appends an index suffix (____N) to an agent ID.
+ * Used to distinguish parallel agents with the same base ID.
+ *
+ * @example
+ * appendAgentIdSuffix('agent_abc123', 1) // => 'agent_abc123____1'
+ * appendAgentIdSuffix('openAI__gpt-4o___GPT-4o', 1) // => 'openAI__gpt-4o___GPT-4o____1'
+ */
+export { appendAgentIdSuffix } from './agents/identity';

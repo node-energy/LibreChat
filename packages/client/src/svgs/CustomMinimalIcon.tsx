@@ -1,3 +1,4 @@
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils';
 export default function CustomMinimalIcon({
   size = 25,
@@ -5,7 +6,7 @@ export default function CustomMinimalIcon({
 }: {
   size?: number;
   className?: string;
-}) {
+}): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -18,6 +19,7 @@ export default function CustomMinimalIcon({
       strokeLinecap="round"
       strokeLinejoin="round"
       className={cn('lucide lucide-bot', className)}
+      aria-hidden="true"
     >
       <path d="M12 8V4H8" />
       <rect width="16" height="12" x="4" y="8" rx="2" />

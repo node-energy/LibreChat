@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { logger } = require('@librechat/data-schemas');
 const { Strategy: AppleStrategy } = require('passport-apple');
+const { createOAuthStateStore, deferStateToStore } = require('@librechat/api');
 const socialLogin = require('./socialLogin');
 
 /**
@@ -34,16 +35,38 @@ const getProfileDetails = ({ idToken, profile }) => {
 
 // Initialize the social login handler for Apple
 const appleLogin = socialLogin('apple', getProfileDetails);
+const appleAdminLogin = socialLogin('apple', getProfileDetails, { existingUsersOnly: true });
 
-module.exports = () =>
-  new AppleStrategy(
+const getAppleConfig = (callbackURL) => ({
+  clientID: process.env.APPLE_CLIENT_ID,
+  teamID: process.env.APPLE_TEAM_ID,
+  callbackURL,
+  keyID: process.env.APPLE_KEY_ID,
+  privateKeyLocation: process.env.APPLE_PRIVATE_KEY_PATH,
+  passReqToCallback: false,
+});
+
+/**
+ * Apple returns with a cross-site form POST, so its state cookie must be `SameSite=None`.
+ * @param {Omit<import('@librechat/api').OAuthStateStoreOptions, 'provider'>} stateOptions
+ */
+const appleStrategy = (stateOptions) => {
+  const strategy = new AppleStrategy(
     {
-      clientID: process.env.APPLE_CLIENT_ID,
-      teamID: process.env.APPLE_TEAM_ID,
-      callbackURL: `${process.env.DOMAIN_SERVER}${process.env.APPLE_CALLBACK_URL}`,
-      keyID: process.env.APPLE_KEY_ID,
-      privateKeyLocation: process.env.APPLE_PRIVATE_KEY_PATH,
-      passReqToCallback: false, // Set to true if you need to access the request in the callback
+      ...getAppleConfig(`${process.env.DOMAIN_SERVER}${process.env.APPLE_CALLBACK_URL}`),
+      store: createOAuthStateStore({ ...stateOptions, provider: 'apple', crossSiteCallback: true }),
     },
     appleLogin,
   );
+  deferStateToStore(strategy);
+  return strategy;
+};
+
+const appleAdminStrategy = () =>
+  new AppleStrategy(
+    getAppleConfig(`${process.env.DOMAIN_SERVER}/api/admin/oauth/apple/callback`),
+    appleAdminLogin,
+  );
+
+module.exports = appleStrategy;
+module.exports.appleAdminLogin = appleAdminStrategy;

@@ -1,10 +1,32 @@
 import axios from 'axios';
-import { logger } from '@librechat/data-schemas';
+import { logger, encryptV2 } from '@librechat/data-schemas';
 import { TokenExchangeMethodEnum } from 'librechat-data-provider';
-import type { TokenMethods } from '@librechat/data-schemas';
+import type { IToken, TokenMethods } from '@librechat/data-schemas';
 import type { AxiosError } from 'axios';
-import { encryptV2, decryptV2 } from '~/crypto';
+import { DEFAULT_OAUTH_TOKEN_TTL_SECONDS, normalizeExpiresIn } from './expiry';
+import { validateActionOAuthEndpoint } from './validation';
+import { decryptSensitiveValue } from '~/actions/crypto';
+import { createSSRFSafeAgents } from '~/auth';
 import { logAxiosError } from '~/utils';
+
+const actionOAuthAgents = createSSRFSafeAgents();
+const actionOAuthAgentsByAddress = new Map<string, ReturnType<typeof createSSRFSafeAgents>>();
+
+function getActionOAuthAgents(allowedAddresses?: string[] | null) {
+  if (!Array.isArray(allowedAddresses) || allowedAddresses.length === 0) {
+    return actionOAuthAgents;
+  }
+
+  const cacheKey = allowedAddresses.join('\n');
+  const cachedAgents = actionOAuthAgentsByAddress.get(cacheKey);
+  if (cachedAgents) {
+    return cachedAgents;
+  }
+
+  const agents = createSSRFSafeAgents(allowedAddresses);
+  actionOAuthAgentsByAddress.set(cacheKey, agents);
+  return agents;
+}
 
 export function createHandleOAuthToken({
   findToken,
@@ -39,14 +61,9 @@ export function createHandleOAuthToken({
     expiresIn?: number | string | null;
     metadata?: Record<string, unknown>;
     type?: string;
-  }) {
+  }): Promise<IToken | null> {
     const encrypedToken = await encryptV2(token);
-    let expiresInNumber = 3600;
-    if (typeof expiresIn === 'number') {
-      expiresInNumber = expiresIn;
-    } else if (expiresIn != null) {
-      expiresInNumber = parseInt(expiresIn, 10) || 3600;
-    }
+    const expiresInNumber = normalizeExpiresIn(expiresIn) ?? DEFAULT_OAUTH_TOKEN_TTL_SECONDS;
     const tokenData = {
       type,
       userId,
@@ -144,6 +161,7 @@ export async function refreshAccessToken(
     token_exchange_method,
     encrypted_oauth_client_id,
     encrypted_oauth_client_secret,
+    allowedAddresses,
   }: {
     userId: string;
     client_url: string;
@@ -152,6 +170,7 @@ export async function refreshAccessToken(
     token_exchange_method: TokenExchangeMethodEnum;
     encrypted_oauth_client_id: string;
     encrypted_oauth_client_secret: string;
+    allowedAddresses?: string[] | null;
   },
   {
     findToken,
@@ -168,9 +187,11 @@ export async function refreshAccessToken(
   refresh_token?: string;
   refresh_token_expires_in?: number;
 }> {
+  await validateActionOAuthEndpoint(client_url, 'client_url', allowedAddresses);
+
   try {
-    const oauth_client_id = await decryptV2(encrypted_oauth_client_id);
-    const oauth_client_secret = await decryptV2(encrypted_oauth_client_secret);
+    const oauth_client_id = await decryptSensitiveValue(encrypted_oauth_client_id);
+    const oauth_client_secret = await decryptSensitiveValue(encrypted_oauth_client_secret);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -194,6 +215,8 @@ export async function refreshAccessToken(
       method: 'POST',
       url: client_url,
       headers,
+      maxRedirects: 0,
+      httpsAgent: getActionOAuthAgents(allowedAddresses).httpsAgent,
       data: params.toString(),
     });
     await processAccessTokens(
@@ -243,6 +266,7 @@ export async function getAccessToken(
     token_exchange_method,
     encrypted_oauth_client_id,
     encrypted_oauth_client_secret,
+    allowedAddresses,
   }: {
     code: string;
     userId: string;
@@ -252,6 +276,7 @@ export async function getAccessToken(
     token_exchange_method: TokenExchangeMethodEnum;
     encrypted_oauth_client_id: string;
     encrypted_oauth_client_secret: string;
+    allowedAddresses?: string[] | null;
   },
   {
     findToken,
@@ -268,8 +293,10 @@ export async function getAccessToken(
   refresh_token?: string;
   refresh_token_expires_in?: number;
 }> {
-  const oauth_client_id = await decryptV2(encrypted_oauth_client_id);
-  const oauth_client_secret = await decryptV2(encrypted_oauth_client_secret);
+  await validateActionOAuthEndpoint(client_url, 'client_url', allowedAddresses);
+
+  const oauth_client_id = await decryptSensitiveValue(encrypted_oauth_client_id);
+  const oauth_client_secret = await decryptSensitiveValue(encrypted_oauth_client_secret);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
@@ -295,6 +322,8 @@ export async function getAccessToken(
       method: 'POST',
       url: client_url,
       headers,
+      maxRedirects: 0,
+      httpsAgent: getActionOAuthAgents(allowedAddresses).httpsAgent,
       data: params.toString(),
     });
 

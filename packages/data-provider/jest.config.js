@@ -1,3 +1,5 @@
+const { maxWorkers } = require('../../config/jest.workers.cjs');
+
 module.exports = {
   collectCoverageFrom: ['src/**/*.{js,jsx,ts,tsx}', '!<rootDir>/node_modules/'],
   coveragePathIgnorePatterns: ['/node_modules/', '/dist/'],
@@ -14,5 +16,6 @@ module.exports = {
   //     lines: 57,
   //   },
   // },
+  maxWorkers,
   restoreMocks: true,
 };

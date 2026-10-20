@@ -8,7 +8,7 @@ import type {
   ImageFile,
   ContentPart,
   PartMetadata,
-  TContentData,
+  ChatContentFrame,
   EventSubmission,
   TMessageContentParts,
 } from 'librechat-data-provider';
@@ -20,33 +20,49 @@ type TUseContentHandler = {
 };
 
 type TContentHandler = {
-  data: TContentData;
+  data: ChatContentFrame;
   submission: EventSubmission;
 };
 
 export default function useContentHandler({ setMessages, getMessages }: TUseContentHandler) {
   const queryClient = useQueryClient();
   const messageMap = useMemo(() => new Map<string, TMessage>(), []);
-  return useCallback(
+
+  /** Reset the message map - call this after sync to prevent stale state from overwriting synced content */
+  const resetMessageMap = useCallback(() => {
+    messageMap.clear();
+  }, [messageMap]);
+
+  const handler = useCallback(
     ({ data, submission }: TContentHandler) => {
       const { type, messageId, thread_id, conversationId, index } = data;
-
-      const _messages = getMessages();
-      const messages =
-        _messages?.filter((m) => m.messageId !== messageId).map((msg) => ({ ...msg, thread_id })) ??
-        [];
+      const _messages = getMessages() ?? [];
+      const messages: TMessage[] = [];
+      let existingMessage: TMessage | undefined;
+      for (const msg of _messages) {
+        if (msg.messageId === messageId) {
+          existingMessage ??= msg;
+          continue;
+        }
+        messages.push(
+          thread_id == null || msg.thread_id === thread_id ? msg : { ...msg, thread_id },
+        );
+      }
       const userMessage = messages[messages.length - 1] as TMessage | undefined;
 
       const { initialResponse } = submission;
 
       let response = messageMap.get(messageId);
       if (!response) {
+        const responseBase = existingMessage ?? (initialResponse as TMessage);
+        const responseThreadId =
+          thread_id ?? responseBase.thread_id ?? (initialResponse as TMessage).thread_id;
         response = {
-          ...(initialResponse as TMessage),
+          ...responseBase,
           parentMessageId: userMessage?.messageId ?? '',
           conversationId,
           messageId,
-          thread_id,
+          ...(responseThreadId != null ? { thread_id: responseThreadId } : {}),
         };
         messageMap.set(messageId, response);
       }
@@ -82,4 +98,6 @@ export default function useContentHandler({ setMessages, getMessages }: TUseCont
     },
     [queryClient, getMessages, messageMap, setMessages],
   );
+
+  return { contentHandler: handler, resetContentHandler: resetMessageMap };
 }

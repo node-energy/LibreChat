@@ -1,48 +1,28 @@
-import dedent from 'dedent';
+import { highContrastDarkTheme, highContrastLightTheme } from '@librechat/client';
+import type { IThemeRGB } from '@librechat/client';
 
-const markdownRenderer = dedent(`import React, { useEffect, useState } from 'react';
-import Markdown from 'marked-react';
+const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 
-interface MarkdownRendererProps {
-  content: string;
-}
-
-const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
-  return (
-    <div
-      className="markdown-body"
-      style={{
-        padding: '2rem',        
-        margin: '1rem',
-        minHeight: '100vh'
-      }}
-    >
-      <Markdown gfm={true} breaks={true}>{content}</Markdown>
-    </div>
-  );
-};
-
-export default MarkdownRenderer;`);
-
-const wrapMarkdownRenderer = (content: string) => {
-  // Normalize indentation: convert 2-space indents to 4-space for proper nesting
-  const normalizedContent = content.replace(/^( {2})(-|\d+\.)/gm, '    $2');
-
-  // Escape backticks, backslashes, and dollar signs in the content
-  const escapedContent = normalizedContent
-    .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
-
-  return dedent(`import React from 'react';
-import MarkdownRenderer from '/components/ui/MarkdownRenderer';
-
-const App = () => {
-  return <MarkdownRenderer content={\`${escapedContent}\`} />;
-};
-
-export default App;
-`);
+/**
+ * Allowlist-based URL validator for markdown artifact rendering.
+ * The logic body is duplicated verbatim into the generated static HTML
+ * template (`EMBEDDED_IS_SAFE_URL` constant below). Any behavioral change
+ * here MUST be applied to both copies. A sync-verification test in
+ * `markdown.test.ts` enforces this.
+ */
+export const isSafeUrl = (url: string): boolean => {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.startsWith('/') || trimmed.startsWith('#') || trimmed.startsWith('.')) {
+    return true;
+  }
+  try {
+    return SAFE_PROTOCOLS.has(new URL(trimmed).protocol);
+  } catch {
+    return false;
+  }
 };
 
 const markdownCSS = `
@@ -192,6 +172,13 @@ const markdownCSS = `
   box-sizing: content-box;
 }
 
+/* Rendered in place of the document when the marked CDN does not load. Its own
+   rule rather than an inline style so a contrast mode can reach it. */
+.markdown-error {
+  color: #e53e3e;
+  padding: 1rem;
+}
+
 /* Dark theme */
 @media (prefers-color-scheme: dark) {
   .markdown-body {
@@ -234,23 +221,147 @@ const markdownCSS = `
     background-color: #21262d;
   }
 }
+
+/* Scrollbar */
+::-webkit-scrollbar { height: 0.1em; width: 0.5rem; }
+::-webkit-scrollbar-thumb { background-color: rgba(0,0,0,0.1); border-radius: 9999px; }
+::-webkit-scrollbar-track { background-color: transparent; border-radius: 9999px; }
+@media (prefers-color-scheme: dark) {
+  ::-webkit-scrollbar-thumb { background-color: hsla(0,0%,100%,0.1); }
+}
+* { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.1) transparent; }
+@media (prefers-color-scheme: dark) {
+  * { scrollbar-color: hsla(0,0%,100%,0.1) transparent; }
+}
 `;
 
-export const getMarkdownFiles = (content: string) => {
+/**
+ * Escapes content for safe embedding inside a JS template literal that
+ * lives within an HTML `<script>` block. Prevents the content from
+ * breaking out of the template literal or prematurely closing the
+ * surrounding `<script>` tag (which would allow arbitrary HTML injection).
+ */
+function escapeForTemplateLiteral(content: string): string {
+  return content
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$')
+    .replace(/<\/script/gi, '<\\/script');
+}
+
+const MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js';
+const MARKED_SRI = 'sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+';
+
+/**
+ * Embedded JS copy of `isSafeUrl`. Keep in sync with the exported
+ * TypeScript version above — `markdown.test.ts` has a sync-verification
+ * test that will break if the two copies diverge.
+ */
+export const EMBEDDED_IS_SAFE_URL = `const SAFE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+const isSafeUrl = (url) => {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('/') || trimmed.startsWith('#') || trimmed.startsWith('.')) return true;
+  try { return SAFE_PROTOCOLS.has(new URL(trimmed).protocol); } catch(e) { return false; }
+};`;
+
+/**
+ * The stylesheet above is a fixed GitHub palette selected by the iframe's own
+ * `prefers-color-scheme`, which no app token reaches. In a contrast mode this
+ * block is appended unconditionally, so it also overrides that media query and
+ * an explicit contrast choice is honoured whatever the OS is set to. Every
+ * colour the media query sets has to be answered here, including the `thead`
+ * tint: leaving it would strand #f6f8fa or #161b22 under the new ink. Contrast
+ * palettes collapse subtle fills onto the canvas, so the header reads through
+ * its bold cells and its border rather than a tint of its own.
+ */
+function contrastMarkdownCSS(isDarkMode: boolean): string {
+  const palette = isDarkMode ? highContrastDarkTheme : highContrastLightTheme;
+  const hex = (token: keyof IThemeRGB, fallback: string): string => {
+    const channels = palette[token]?.trim().split(/\s+/).map(Number);
+    if (channels?.length !== 3 || channels.some(Number.isNaN)) {
+      return fallback;
+    }
+    return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+  };
+
+  const canvas = hex('rgb-surface-primary', isDarkMode ? '#000000' : '#ffffff');
+  const ink = hex('rgb-text-primary', isDarkMode ? '#ffffff' : '#000000');
+  const link = hex('rgb-link', isDarkMode ? '#8cc8ff' : '#0000cc');
+  const border = hex('rgb-border-medium', ink);
+  const codeFill = hex('rgb-surface-secondary', canvas);
+  /** The renderer-failure notice is the one message this document paints itself,
+   *  and it has to survive a CDN outage inside a contrast mode. */
+  const destructive = hex('rgb-text-destructive', isDarkMode ? '#ff8f8f' : '#a10000');
+
+  return `
+.markdown-body { color: ${ink}; background-color: ${canvas}; }
+body { background-color: ${canvas}; }
+.markdown-body h1, .markdown-body h2 { border-bottom-color: ${border}; }
+.markdown-body a, .markdown-body a:hover { color: ${link}; text-decoration: underline; }
+.markdown-body table th, .markdown-body table td { border-color: ${border}; }
+.markdown-body table thead { background-color: ${canvas}; }
+.markdown-body blockquote { border-left-color: ${border}; color: ${ink}; }
+.markdown-body hr { background-color: ${border}; }
+.markdown-body code, .markdown-body pre { color: ${ink}; background-color: ${codeFill}; }
+.markdown-body pre { border: 1px solid ${border}; }
+::-webkit-scrollbar-thumb { background-color: ${ink}; }
+* { scrollbar-color: ${ink} ${canvas}; }
+.markdown-error { color: ${destructive}; }
+`;
+}
+
+function generateMarkdownHtml(content: string, contrastCSS = ''): string {
+  const normalizedContent = content.replace(/^( {2})(-|\d+\.)/gm, '    $2');
+  const escapedContent = escapeForTemplateLiteral(normalizedContent);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Markdown Preview</title>
+<style>${markdownCSS}${contrastCSS}</style>
+</head>
+<body>
+<div class="markdown-body" id="content" style="padding:2rem;margin:1rem;min-height:100vh"></div>
+<script src="${MARKED_CDN}" integrity="${MARKED_SRI}" crossorigin="anonymous"></script>
+<script>
+if (typeof marked === 'undefined') {
+  document.getElementById('content').innerHTML =
+    '<p class="markdown-error">Markdown renderer failed to load. Check network connectivity.</p>';
+} else {
+${EMBEDDED_IS_SAFE_URL}
+marked.use({
+  gfm: true,
+  breaks: true,
+  renderer: {
+    html() { return ''; },
+    link(token) {
+      if (!isSafeUrl(token.href || '')) return '';
+      return false; // fall through to marked's default link renderer
+    },
+    image(token) {
+      if (!isSafeUrl(token.href || '')) return '';
+      return false; // fall through to marked's default image renderer
+    }
+  }
+});
+document.getElementById('content').innerHTML = marked.parse(\`${escapedContent}\`);
+}
+</script>
+</body>
+</html>`;
+}
+
+export const getMarkdownFiles = (
+  content: string,
+  isDarkMode = false,
+  highContrast = false,
+): Record<string, string> => {
+  const md = content || '# No content provided';
   return {
-    'content.md': content || '# No content provided',
-    'App.tsx': wrapMarkdownRenderer(content),
-    'index.tsx': dedent(`import React, { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import "./styles.css";
-import "./markdown.css";
-
-import App from "./App";
-
-const root = createRoot(document.getElementById("root"));
-root.render(<App />);
-;`),
-    '/components/ui/MarkdownRenderer.tsx': markdownRenderer,
-    'markdown.css': markdownCSS,
+    'content.md': md,
+    'index.html': generateMarkdownHtml(md, highContrast ? contrastMarkdownCSS(isDarkMode) : ''),
   };
 };

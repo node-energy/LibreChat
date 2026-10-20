@@ -1,13 +1,11 @@
 const mongoose = require('mongoose');
-const { logger } = require('@librechat/data-schemas');
+const { logger, warnOnMissingSearchTokens } = require('@librechat/data-schemas');
 const {
   logAgentMigrationWarning,
   logPromptMigrationWarning,
   checkAgentPermissionsMigration,
   checkPromptPermissionsMigration,
 } = require('@librechat/api');
-const { getProjectByName } = require('~/models/Project');
-const { Agent, PromptGroup } = require('~/db/models');
 const { findRoleByIdentifier } = require('~/models');
 
 /**
@@ -15,14 +13,15 @@ const { findRoleByIdentifier } = require('~/models');
  * This runs at the end to ensure all systems are initialized
  */
 async function checkMigrations() {
+  /** Started first so it overlaps the permission checks; it logs its own failures. */
+  const searchTokens = warnOnMissingSearchTokens(mongoose.connection);
   try {
     const agentMigrationResult = await checkAgentPermissionsMigration({
       mongoose,
       methods: {
         findRoleByIdentifier,
-        getProjectByName,
       },
-      AgentModel: Agent,
+      AgentModel: mongoose.models.Agent,
     });
     logAgentMigrationWarning(agentMigrationResult);
   } catch (error) {
@@ -33,14 +32,14 @@ async function checkMigrations() {
       mongoose,
       methods: {
         findRoleByIdentifier,
-        getProjectByName,
       },
-      PromptGroupModel: PromptGroup,
+      PromptGroupModel: mongoose.models.PromptGroup,
     });
     logPromptMigrationWarning(promptMigrationResult);
   } catch (error) {
     logger.error('Failed to check prompt permissions migration:', error);
   }
+  await searchTokens;
 }
 
 module.exports = {

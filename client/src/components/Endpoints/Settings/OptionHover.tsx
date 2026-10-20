@@ -36,11 +36,6 @@ const types = {
   },
   openAI,
   azureOpenAI: openAI,
-  gptPlugins: {
-    func: 'com_endpoint_func_hover',
-    skip: 'com_endpoint_skip_hover',
-    ...openAI,
-  },
 };
 
 function OptionHover({ endpoint, type, side }: TOptionHoverProps) {
@@ -53,7 +48,7 @@ function OptionHover({ endpoint, type, side }: TOptionHoverProps) {
     <HoverCardPortal>
       <HoverCardContent side={side} className="z-[999] w-80">
         <div className="space-y-2">
-          <p className="text-sm text-gray-600 dark:text-gray-300">{localize(text)}</p>
+          <p className="text-sm text-text-secondary">{localize(text)}</p>
         </div>
       </HoverCardContent>
     </HoverCardPortal>

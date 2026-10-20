@@ -1,13 +1,20 @@
 import React, { useMemo } from 'react';
-import DOMPurify from 'dompurify';
 import { useForm, Controller } from 'react-hook-form';
-import { Input, Label, Button } from '@librechat/client';
+import { Label, Input, Button, SecretInput } from '@librechat/client';
+import type { Control, FieldErrors } from 'react-hook-form';
+import {
+  CONFIG_HTML_INLINE_TAGS,
+  CONFIG_HTML_CLASS_ATTR,
+  createConfigHtmlSanitizer,
+} from '~/utils/configHtml';
 import { useMCPAuthValuesQuery } from '~/data-provider/Tools/queries';
 import { useLocalize } from '~/hooks';
 
 export interface CustomUserVarConfig {
   title: string;
   description?: string;
+  /** Whether the field holds a secret and should be masked (defaults to masked when omitted). */
+  sensitive?: boolean;
 }
 
 interface CustomUserVarsSectionProps {
@@ -21,84 +28,82 @@ interface AuthFieldProps {
   name: string;
   config: CustomUserVarConfig;
   hasValue: boolean;
-  control: any;
-  errors: any;
+  control: Control<Record<string, string>>;
+  errors: FieldErrors<Record<string, string>>;
+  autoFocus?: boolean;
 }
 
-function AuthField({ name, config, hasValue, control, errors }: AuthFieldProps) {
+function AuthField({ name, config, hasValue, control, errors, autoFocus }: AuthFieldProps) {
   const localize = useLocalize();
-
-  const sanitizer = useMemo(() => {
-    const instance = DOMPurify();
-    instance.addHook('afterSanitizeAttributes', (node) => {
-      if (node.tagName && node.tagName === 'A') {
-        node.setAttribute('target', '_blank');
-        node.setAttribute('rel', 'noopener noreferrer');
-      }
-    });
-    return instance;
-  }, []);
+  const statusText = hasValue ? localize('com_ui_set') : localize('com_ui_unset');
+  const sanitize = useMemo(
+    () =>
+      createConfigHtmlSanitizer({
+        allowedTags: CONFIG_HTML_INLINE_TAGS,
+        allowedAttr: CONFIG_HTML_CLASS_ATTR,
+      }),
+    [],
+  );
 
   const sanitizedDescription = useMemo(() => {
-    if (!config.description) {
-      return '';
-    }
-    try {
-      return sanitizer.sanitize(config.description, {
-        ALLOWED_TAGS: ['a', 'strong', 'b', 'em', 'i', 'br', 'code'],
-        ALLOWED_ATTR: ['href', 'class', 'target', 'rel'],
-        ALLOW_DATA_ATTR: false,
-        ALLOW_ARIA_ATTR: false,
-      });
-    } catch (error) {
-      console.error('Sanitization failed', error);
-      return config.description;
-    }
-  }, [config.description, sanitizer]);
+    return sanitize(config.description);
+  }, [config.description, sanitize]);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label htmlFor={name} className="text-sm font-medium">
-          {config.title}
+          {config.title} <span className="sr-only">({statusText})</span>
         </Label>
-        {hasValue ? (
-          <div className="flex min-w-fit items-center gap-2 whitespace-nowrap rounded-full border border-border-light px-2 py-0.5 text-xs font-medium text-text-secondary">
-            <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
-            <span>{localize('com_ui_set')}</span>
-          </div>
-        ) : (
-          <div className="flex min-w-fit items-center gap-2 whitespace-nowrap rounded-full border border-border-light px-2 py-0.5 text-xs font-medium text-text-secondary">
-            <div className="h-1.5 w-1.5 rounded-full border border-border-medium" />
-            <span>{localize('com_ui_unset')}</span>
-          </div>
-        )}
+        <div aria-hidden="true">
+          {hasValue ? (
+            <div className="border-border-light text-text-secondary flex min-w-fit items-center gap-2 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+              <div className="bg-status-success h-1.5 w-1.5 rounded-full" />
+              <span>{localize('com_ui_set')}</span>
+            </div>
+          ) : (
+            <div className="border-border-light text-text-secondary flex min-w-fit items-center gap-2 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+              <div className="border-border-medium h-1.5 w-1.5 rounded-full border" />
+              <span>{localize('com_ui_unset')}</span>
+            </div>
+          )}
+        </div>
       </div>
       <Controller
         name={name}
         control={control}
         defaultValue=""
-        render={({ field }) => (
-          <Input
-            id={name}
-            type="text"
-            {...field}
-            placeholder={
-              hasValue
-                ? localize('com_ui_mcp_update_var', { 0: config.title })
-                : localize('com_ui_mcp_enter_var', { 0: config.title })
-            }
-            className="w-full rounded border border-border-medium bg-transparent px-2 py-1 text-text-primary placeholder:text-text-secondary focus:outline-none sm:text-sm"
-          />
-        )}
+        render={({ field }) => {
+          const placeholder = hasValue
+            ? localize('com_ui_mcp_update_var', { 0: config.title })
+            : localize('com_ui_mcp_enter_var', { 0: config.title });
+          const className = 'w-full rounded px-2 py-1 sm:text-sm';
+          // Prevent autofill: browser DOM mutations bypass React's synthetic
+          // onChange, silently emptying react-hook-form state on submit.
+          const sharedProps = {
+            id: name,
+            'data-lpignore': 'true',
+            'data-1p-ignore': 'true',
+            /* autoFocus is generally disorienting, but here the required field is navigated to
+             * anyway, and the section emulates a modal opening where users expect focus to shift. */
+            autoFocus,
+            ...field,
+            placeholder,
+            className,
+          };
+          if (config.sensitive === false) {
+            return <Input {...sharedProps} type="text" autoComplete="off" />;
+          }
+          return <SecretInput {...sharedProps} autoComplete="new-password" controlsOnHover />;
+        }}
       />
       {sanitizedDescription && (
         <p
-          className="text-xs text-text-secondary [&_a]:text-blue-500 [&_a]:hover:underline"
+          className="text-text-secondary [&_a]:text-link text-xs [&_a]:hover:underline"
           dangerouslySetInnerHTML={{ __html: sanitizedDescription }}
         />
       )}
-      {errors[name] && <p className="text-xs text-red-500">{errors[name]?.message}</p>}
+      {errors[name] && <p className="text-text-destructive text-xs">{errors[name]?.message}</p>}
     </div>
   );
 }
@@ -147,7 +152,7 @@ export default function CustomUserVarsSection({
   return (
     <div className="flex-1 space-y-4">
       <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
-        {Object.entries(fields).map(([key, config]) => {
+        {Object.entries(fields).map(([key, config], index) => {
           const hasValue = authValuesData?.authValueFlags?.[key] || false;
 
           return (
@@ -158,6 +163,8 @@ export default function CustomUserVarsSection({
               hasValue={hasValue}
               control={control}
               errors={errors}
+              // eslint-disable-next-line jsx-a11y/no-autofocus -- See AuthField autoFocus comment for more details
+              autoFocus={index === 0}
             />
           );
         })}
@@ -166,7 +173,7 @@ export default function CustomUserVarsSection({
       <div className="flex justify-end gap-2">
         <Button
           type="button"
-          variant="destructive"
+          variant="destructive-soft"
           disabled={isSubmitting}
           onClick={handleRevokeClick}
         >

@@ -1,4 +1,6 @@
-export default function RenameIcon() {
+import { JSX } from 'react/jsx-runtime';
+
+export default function RenameIcon(): JSX.Element {
   return (
     <svg
       fill="none"
@@ -10,6 +12,7 @@ export default function RenameIcon() {
       height="1em"
       width="1em"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

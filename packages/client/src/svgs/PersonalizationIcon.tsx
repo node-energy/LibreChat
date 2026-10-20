@@ -1,4 +1,10 @@
-export default function PersonalizationIcon({ className = '' }: { className?: string }) {
+import { JSX } from 'react/jsx-runtime';
+
+export default function PersonalizationIcon({
+  className = '',
+}: {
+  className?: string;
+}): JSX.Element {
   return (
     <svg
       width="24"
@@ -7,6 +13,7 @@ export default function PersonalizationIcon({ className = '' }: { className?: st
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`icon-sm ${className}`}
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

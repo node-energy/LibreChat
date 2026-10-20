@@ -1,13 +1,14 @@
 const {
-  SystemRoles,
   EModelEndpoint,
   defaultOrderQuery,
   defaultAssistantsVersion,
 } = require('librechat-data-provider');
+const { logger, SystemCapabilities } = require('@librechat/data-schemas');
 const {
   initializeClient: initAzureClient,
 } = require('~/server/services/Endpoints/azureAssistants');
 const { initializeClient } = require('~/server/services/Endpoints/assistants');
+const { hasCapability } = require('~/server/middleware/roles/capabilities');
 const { getEndpointsConfig } = require('~/server/services/Config');
 
 /**
@@ -32,26 +33,6 @@ const getCurrentVersion = async (req, endpoint) => {
 };
 
 /**
- * Asynchronously lists assistants based on provided query parameters.
- *
- * Initializes the client with the current request and response objects and lists assistants
- * according to the query parameters. This function abstracts the logic for non-Azure paths.
- *
- * @deprecated
- * @async
- * @param {object} params - The parameters object.
- * @param {object} params.req - The request object, used for initializing the client.
- * @param {object} params.res - The response object, used for initializing the client.
- * @param {string} params.version - The API version to use.
- * @param {object} params.query - The query parameters to list assistants (e.g., limit, order).
- * @returns {Promise<object>} A promise that resolves to the response from the `openai.beta.assistants.list` method call.
- */
-const _listAssistants = async ({ req, res, version, query }) => {
-  const { openai } = await getOpenAIClient({ req, res, version });
-  return openai.beta.assistants.list(query);
-};
-
-/**
  * Fetches all assistants based on provided query params, until `has_more` is `false`.
  *
  * @async
@@ -63,7 +44,7 @@ const _listAssistants = async ({ req, res, version, query }) => {
  * @returns {Promise<Array<Assistant>>} A promise that resolves to the response from the `openai.beta.assistants.list` method call.
  */
 const listAllAssistants = async ({ req, res, version, query }) => {
-  /** @type {{ openai: OpenAIClient }} */
+  /** @type {{ openai: OpenAI }} */
   const { openai } = await getOpenAIClient({ req, res, version });
   const allAssistants = [];
 
@@ -138,6 +119,7 @@ const listAssistantsForAzure = async ({ req, res, version, azureConfig = {}, que
 
     /* The specified model is only necessary to
     fetch assistants for the shared instance */
+    req.body = req.body || {}; // Express 5: req.body is undefined instead of {} when no body parser runs
     req.body.model = currentModelTuples[0][0];
     promises.push(listAllAssistants({ req, res, version, query }));
   }
@@ -181,10 +163,10 @@ const listAssistantsForAzure = async ({ req, res, version, azureConfig = {}, que
  * @param {TEndpointOption} params.endpointOption - The endpoint options.
  * @param {boolean} params.initAppClient - Whether to initialize the app client.
  * @param {string} params.overrideEndpoint - The endpoint to override.
- * @returns {Promise<{ openai: OpenAIClient, openAIApiKey: string; client: import('~/app/clients/OpenAIClient') }>} - The initialized OpenAI client.
+ * @returns {Promise<{ openai: OpenAI, openAIApiKey: string }>} - The initialized OpenAI SDK client.
  */
 async function getOpenAIClient({ req, res, endpointOption, initAppClient, overrideEndpoint }) {
-  let endpoint = overrideEndpoint ?? req.body.endpoint ?? req.query.endpoint;
+  let endpoint = overrideEndpoint ?? req.body?.endpoint ?? req.query?.endpoint;
   const version = await getCurrentVersion(req, endpoint);
   if (!endpoint) {
     throw new Error(`[${req.baseUrl}] Endpoint is required`);
@@ -235,9 +217,19 @@ const fetchAssistants = async ({ req, res, overrideEndpoint }) => {
     body = await listAssistantsForAzure({ req, res, version, azureConfig, query });
   }
 
-  if (req.user.role === SystemRoles.ADMIN) {
+  if (!appConfig.endpoints?.[endpoint]) {
     return body;
-  } else if (!appConfig.endpoints?.[endpoint]) {
+  }
+
+  let canManageAssistants = false;
+  try {
+    canManageAssistants = await hasCapability(req.user, SystemCapabilities.MANAGE_ASSISTANTS);
+  } catch (err) {
+    logger.warn(`[fetchAssistants] capability check failed, denying bypass: ${err.message}`);
+  }
+
+  if (canManageAssistants) {
+    logger.debug(`[fetchAssistants] MANAGE_ASSISTANTS bypass for user ${req.user.id}`);
     return body;
   }
 
@@ -273,5 +265,4 @@ function filterAssistants({ assistants, userId, assistantsConfig }) {
 module.exports = {
   getOpenAIClient,
   fetchAssistants,
-  getCurrentVersion,
 };

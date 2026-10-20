@@ -1,14 +1,21 @@
 const jwt = require('jsonwebtoken');
 const { nanoid } = require('nanoid');
-const { tool } = require('@langchain/core/tools');
-const { logger } = require('@librechat/data-schemas');
 const { GraphEvents, sleep } = require('@librechat/agents');
+const { tool } = require('@librechat/agents/langchain/tools');
+const { logger, decryptV2 } = require('@librechat/data-schemas');
 const {
   sendEvent,
-  encryptV2,
-  decryptV2,
+  isAbortError,
   logAxiosError,
+  detachOnAbort,
+  getTokenExpiresAt,
+  getOAuthCallbackUrl,
   refreshAccessToken,
+  GenerationJobManager,
+  createSSRFSafeAgents,
+  encryptSensitiveValue,
+  decryptSensitiveValue,
+  validateActionOAuthMetadata,
 } = require('@librechat/api');
 const {
   Time,
@@ -20,14 +27,20 @@ const {
   isImageVisionTool,
   actionDomainSeparator,
 } = require('librechat-data-provider');
-const { findToken, updateToken, createToken } = require('~/models');
-const { getActions, deleteActions } = require('~/models/Action');
-const { deleteAssistant } = require('~/models/Assistant');
-const { getFlowStateManager } = require('~/config');
+const {
+  findToken,
+  updateToken,
+  createToken,
+  getActions,
+  deleteActions,
+  deleteAssistant,
+} = require('~/models');
+const { getActionFlowStateManager } = require('~/config');
 const { getLogStores } = require('~/cache');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const toolNameRegex = /^[a-zA-Z0-9_-]+$/;
+const protocolRegex = /^https?:\/\//;
 const replaceSeparatorRegex = new RegExp(actionDomainSeparator, 'g');
 
 /**
@@ -45,10 +58,14 @@ const validateAndUpdateTool = async ({ req, tool, assistant_id }) => {
   }
   if (!toolNameRegex.test(tool.function.name)) {
     const [functionName, domain] = tool.function.name.split(actionDelimiter);
-    actions = await getActions({ assistant_id, user: req.user.id }, true);
+    actions = await getActions({ assistantId: assistant_id, user: req.user.id }, true);
     const matchingActions = actions.filter((action) => {
       const metadata = action.metadata;
-      return metadata && metadata.domain === domain;
+      if (!metadata) {
+        return false;
+      }
+      const strippedMetaDomain = stripProtocol(metadata.domain);
+      return strippedMetaDomain === domain || metadata.domain === domain;
     });
     const action = matchingActions[0];
     if (!action) {
@@ -66,10 +83,36 @@ const validateAndUpdateTool = async ({ req, tool, assistant_id }) => {
   return tool;
 };
 
+/** @param {string} domain */
+function stripProtocol(domain) {
+  const stripped = domain.replace(protocolRegex, '');
+  const pathIdx = stripped.indexOf('/');
+  return pathIdx === -1 ? stripped : stripped.substring(0, pathIdx);
+}
+
+/**
+ * Encodes a domain using the legacy scheme (full URL including protocol).
+ * Used for backward-compatible matching against agents saved before the collision fix.
+ * @param {string} domain
+ * @returns {string}
+ */
+function legacyDomainEncode(domain) {
+  if (!domain) {
+    return '';
+  }
+  if (domain.length <= Constants.ENCODED_DOMAIN_LENGTH) {
+    return domain.replace(/\./g, actionDomainSeparator);
+  }
+  const modifiedDomain = Buffer.from(domain).toString('base64');
+  return modifiedDomain.substring(0, Constants.ENCODED_DOMAIN_LENGTH);
+}
+
 /**
  * Encodes or decodes a domain name to/from base64, or replacing periods with a custom separator.
  *
  * Necessary due to `[a-zA-Z0-9_-]*` Regex Validation, limited to a 64-character maximum.
+ * Strips protocol prefix before encoding to prevent base64 collisions
+ * (all `https://` URLs share the same 10-char base64 prefix).
  *
  * @param {string} domain - The domain name to encode/decode.
  * @param {boolean} inverse - False to decode from base64, true to encode to base64.
@@ -79,23 +122,27 @@ async function domainParser(domain, inverse = false) {
   if (!domain) {
     return;
   }
-  const domainsCache = getLogStores(CacheKeys.ENCODED_DOMAINS);
-  const cachedDomain = await domainsCache.get(domain);
-  if (inverse && cachedDomain) {
-    return domain;
-  }
 
-  if (inverse && domain.length <= Constants.ENCODED_DOMAIN_LENGTH) {
-    return domain.replace(/\./g, actionDomainSeparator);
-  }
+  const domainsCache = getLogStores(CacheKeys.ENCODED_DOMAINS);
 
   if (inverse) {
-    const modifiedDomain = Buffer.from(domain).toString('base64');
+    const hostname = stripProtocol(domain);
+    const cachedDomain = await domainsCache.get(hostname);
+    if (cachedDomain) {
+      return hostname;
+    }
+
+    if (hostname.length <= Constants.ENCODED_DOMAIN_LENGTH) {
+      return hostname.replace(/\./g, actionDomainSeparator);
+    }
+
+    const modifiedDomain = Buffer.from(hostname).toString('base64');
     const key = modifiedDomain.substring(0, Constants.ENCODED_DOMAIN_LENGTH);
     await domainsCache.set(key, modifiedDomain);
     return key;
   }
 
+  const cachedDomain = await domainsCache.get(domain);
   if (!cachedDomain) {
     return domain.replace(replaceSeparatorRegex, '.');
   }
@@ -111,14 +158,11 @@ async function domainParser(domain, inverse = false) {
 /**
  * Loads action sets based on the user and assistant ID.
  *
- * @param {Object} searchParams - The parameters for loading action sets.
- * @param {string} searchParams.user - The user identifier.
- * @param {string} [searchParams.agent_id]- The agent identifier.
- * @param {string} [searchParams.assistant_id]- The assistant identifier.
+ * @param {import('@librechat/data-schemas').ActionQuery} query - The criteria for loading action sets.
  * @returns {Promise<Action[] | null>} A promise that resolves to an array of actions or `null` if no match.
  */
-async function loadActionSets(searchParams) {
-  return await getActions(searchParams, true);
+async function loadActionSets(query) {
+  return await getActions(query, true);
 }
 
 /**
@@ -133,6 +177,10 @@ async function loadActionSets(searchParams) {
  * @param {string | undefined} [params.description] - The description for the tool.
  * @param {import('zod').ZodTypeAny | undefined} [params.zodSchema] - The Zod schema for tool input validation/definition
  * @param {{ oauth_client_id?: string; oauth_client_secret?: string; }} params.encrypted - The encrypted values for the action.
+ * @param {string | null} [params.streamId] - The stream ID for resumable streams.
+ * @param {number} [params.jobCreatedAt] - The generation epoch that owns emitted events.
+ * @param {boolean} [params.useSSRFProtection] - When true, uses SSRF-safe HTTP agents that validate resolved IPs at connect time.
+ * @param {string[] | null} [params.allowedAddresses] - Optional admin exemption list of host:port pairs that bypass the SSRF private-IP block.
  * @returns { Promise<typeof tool | { _call: (toolInput: Object | string) => unknown}> } An object with `_call` method to execute the tool input.
  */
 async function createActionTool({
@@ -144,7 +192,12 @@ async function createActionTool({
   name,
   description,
   encrypted,
+  streamId = null,
+  jobCreatedAt,
+  useSSRFProtection = false,
+  allowedAddresses,
 }) {
+  const ssrfAgents = useSSRFProtection ? createSSRFSafeAgents(allowedAddresses) : undefined;
   /** @type {(toolInput: Object | string, config: GraphRunnableConfig) => Promise<unknown>} */
   const _call = async (toolInput, config) => {
     try {
@@ -156,6 +209,8 @@ async function createActionTool({
       if (metadata.auth && metadata.auth.type !== AuthTypeEnum.None) {
         try {
           if (metadata.auth.type === AuthTypeEnum.OAuth && metadata.auth.authorization_url) {
+            await validateActionOAuthMetadata(metadata.auth, allowedAddresses);
+
             const action_id = action.action_id;
             const identifier = `${userId}:${action.action_id}`;
             const requestLogin = async () => {
@@ -171,7 +226,10 @@ async function createActionTool({
 
               const stateToken = jwt.sign(statePayload, JWT_SECRET, { expiresIn: '10m' });
               try {
-                const redirectUri = `${process.env.DOMAIN_CLIENT}/api/actions/${action_id}/oauth/callback`;
+                const redirectUri = getOAuthCallbackUrl(
+                  process.env.DOMAIN_SERVER || 'http://localhost:3080',
+                  `/api/actions/${action_id}/oauth/callback`,
+                );
                 const params = new URLSearchParams({
                   client_id: metadata.oauth_client_id,
                   scope: metadata.auth.scope,
@@ -193,43 +251,71 @@ async function createActionTool({
                   },
                 };
                 const flowsCache = getLogStores(CacheKeys.FLOWS);
-                const flowManager = getFlowStateManager(flowsCache);
+                const flowManager = getActionFlowStateManager(flowsCache);
                 await flowManager.createFlowWithHandler(
                   `${identifier}:oauth_login:${config.metadata.thread_id}:${config.metadata.run_id}`,
                   'oauth_login',
                   async () => {
-                    sendEvent(res, { event: GraphEvents.ON_RUN_STEP_DELTA, data });
+                    const eventData = { event: GraphEvents.ON_RUN_STEP_DELTA, data };
+                    if (streamId) {
+                      await GenerationJobManager.emitChunk(streamId, eventData, {
+                        expectedCreatedAt: jobCreatedAt,
+                      });
+                    } else {
+                      sendEvent(res, eventData);
+                    }
                     logger.debug('Sent OAuth login request to client', { action_id, identifier });
                     return true;
                   },
                   config?.signal,
                 );
                 logger.debug('Waiting for OAuth Authorization response', { action_id, identifier });
-                const result = await flowManager.createFlow(
-                  identifier,
-                  'oauth',
-                  {
+                /** Detached rather than signalled. This key is `userId:action_id`,
+                 *  so a second run for the same action joins this very flow and
+                 *  the browser's OAuth callback reads its metadata to exchange
+                 *  the code; `monitorFlow` deletes the key when a waiter's signal
+                 *  aborts, which would strand the other run and discard an
+                 *  authorization the user already granted. Stopping only this
+                 *  waiter leaves the flow to finish for whoever else needs it,
+                 *  while keeping a late authorization from resuming this call
+                 *  into the API request below. */
+                const result = await detachOnAbort(
+                  flowManager.createFlow(identifier, 'oauth', {
                     state: stateToken,
                     userId: userId,
                     client_url: metadata.auth.client_url,
-                    redirect_uri: `${process.env.DOMAIN_SERVER}/api/actions/${action_id}/oauth/callback`,
+                    redirect_uri: redirectUri,
                     token_exchange_method: metadata.auth.token_exchange_method,
+                    allowedAddresses,
                     /** Encrypted values */
                     encrypted_oauth_client_id: encrypted.oauth_client_id,
                     encrypted_oauth_client_secret: encrypted.oauth_client_secret,
-                  },
+                  }),
                   config?.signal,
                 );
                 logger.debug('Received OAuth Authorization response', { action_id, identifier });
                 data.delta.auth = undefined;
                 data.delta.expires_at = undefined;
-                sendEvent(res, { event: GraphEvents.ON_RUN_STEP_DELTA, data });
+                const successEventData = { event: GraphEvents.ON_RUN_STEP_DELTA, data };
+                if (streamId) {
+                  await GenerationJobManager.emitChunk(streamId, successEventData, {
+                    expectedCreatedAt: jobCreatedAt,
+                  });
+                } else {
+                  sendEvent(res, successEventData);
+                }
                 await sleep(3000);
                 metadata.oauth_access_token = result.access_token;
                 metadata.oauth_refresh_token = result.refresh_token;
-                const expiresAt = new Date(Date.now() + result.expires_in * 1000);
-                metadata.oauth_token_expires_at = expiresAt.toISOString();
+                const expiresAt = getTokenExpiresAt(result.expires_in);
+                metadata.oauth_token_expires_at = expiresAt?.toISOString();
               } catch (error) {
+                /** A stopped run is not an authentication failure. Relabelling it
+                 *  loses the abort identity every downstream boundary keys on and
+                 *  reports a fault the user caused deliberately. */
+                if (isAbortError(error)) {
+                  throw error;
+                }
                 const errorMessage = 'Failed to authenticate OAuth tool';
                 logger.error(errorMessage, error);
                 throw new Error(errorMessage);
@@ -271,6 +357,7 @@ async function createActionTool({
                       encrypted_oauth_client_id: encrypted.oauth_client_id,
                       token_exchange_method: metadata.auth.token_exchange_method,
                       encrypted_oauth_client_secret: encrypted.oauth_client_secret,
+                      allowedAddresses,
                     },
                     {
                       findToken,
@@ -279,20 +366,31 @@ async function createActionTool({
                     },
                   );
                 const flowsCache = getLogStores(CacheKeys.FLOWS);
-                const flowManager = getFlowStateManager(flowsCache);
-                const refreshData = await flowManager.createFlowWithHandler(
-                  `${identifier}:refresh`,
-                  'oauth_refresh',
-                  refreshTokens,
+                const flowManager = getActionFlowStateManager(flowsCache);
+                /** Also shared across this user's runs for the action; see the
+                 *  authorization flow above for why it is detached, not
+                 *  signalled. */
+                const refreshData = await detachOnAbort(
+                  flowManager.createFlowWithHandler(
+                    `${identifier}:refresh`,
+                    'oauth_refresh',
+                    refreshTokens,
+                  ),
                   config?.signal,
                 );
                 metadata.oauth_access_token = refreshData.access_token;
                 if (refreshData.refresh_token) {
                   metadata.oauth_refresh_token = refreshData.refresh_token;
                 }
-                const expiresAt = new Date(Date.now() + refreshData.expires_in * 1000);
-                metadata.oauth_token_expires_at = expiresAt.toISOString();
+                const expiresAt = getTokenExpiresAt(refreshData.expires_in);
+                metadata.oauth_token_expires_at = expiresAt?.toISOString();
               } catch (error) {
+                /** The refresh did not fail — this run stopped waiting on it.
+                 *  Falling through to `requestLogin` would emit an OAuth prompt
+                 *  and open pending authorization state for a turn that is over. */
+                if (isAbortError(error)) {
+                  throw error;
+                }
                 logger.error('Failed to refresh token, requesting new login:', error);
                 await requestLogin();
               }
@@ -304,6 +402,7 @@ async function createActionTool({
           await preparedExecutor.setAuth(metadata);
         } catch (error) {
           if (
+            isAbortError(error) ||
             error.message.includes('No access token found') ||
             error.message.includes('Access token is expired')
           ) {
@@ -313,13 +412,20 @@ async function createActionTool({
         }
       }
 
-      const response = await preparedExecutor.execute();
+      const response = await preparedExecutor.execute(ssrfAgents);
 
       if (typeof response.data === 'object') {
         return JSON.stringify(response.data);
       }
       return response.data;
     } catch (error) {
+      /** Surface the cancellation as a cancellation: `logAxiosError` would log it
+       *  at error level and return its text as the tool's result, presenting a
+       *  stopped turn as a failed API call. */
+      if (isAbortError(error)) {
+        logger.debug(`Action call to ${action.metadata.domain} cancelled by user abort`);
+        throw error;
+      }
       const message = `API call to ${action.metadata.domain} failed:`;
       return logAxiosError({ message, error });
     }
@@ -336,27 +442,6 @@ async function createActionTool({
   return {
     _call,
   };
-}
-
-/**
- * Encrypts a sensitive value.
- * @param {string} value
- * @returns {Promise<string>}
- */
-async function encryptSensitiveValue(value) {
-  // Encode API key to handle special characters like ":"
-  const encodedValue = encodeURIComponent(value);
-  return await encryptV2(encodedValue);
-}
-
-/**
- * Decrypts a sensitive value.
- * @param {string} value
- * @returns {Promise<string>}
- */
-async function decryptSensitiveValue(value) {
-  const decryptedValue = await decryptV2(value);
-  return decodeURIComponent(decryptedValue);
 }
 
 /**
@@ -429,8 +514,8 @@ async function decryptMetadata(metadata) {
  */
 const deleteAssistantActions = async ({ req, assistant_id }) => {
   try {
-    await deleteActions({ assistant_id, user: req.user.id });
-    await deleteAssistant({ assistant_id, user: req.user.id });
+    await deleteActions({ assistantId: assistant_id, user: req.user.id });
+    await deleteAssistant({ assistantId: assistant_id, user: req.user.id });
   } catch (error) {
     const message = 'Trouble deleting Assistant Actions for Assistant ID: ' + assistant_id;
     logger.error(message, error);
@@ -441,6 +526,7 @@ const deleteAssistantActions = async ({ req, assistant_id }) => {
 module.exports = {
   deleteAssistantActions,
   validateAndUpdateTool,
+  legacyDomainEncode,
   createActionTool,
   encryptMetadata,
   decryptMetadata,

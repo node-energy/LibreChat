@@ -16,6 +16,7 @@ const TIMESTAMPED_KEYS = [
   LocalStorageKeys.LAST_WEB_SEARCH_TOGGLE_,
   LocalStorageKeys.LAST_FILE_SEARCH_TOGGLE_,
   LocalStorageKeys.LAST_ARTIFACTS_TOGGLE_,
+  LocalStorageKeys.LAST_MEMORY_TOGGLE_,
   LocalStorageKeys.PIN_MCP_,
 ];
 
@@ -23,14 +24,6 @@ const TIMESTAMPED_KEYS = [
  * Set only a timestamp for a key (when the value is handled elsewhere)
  */
 export function setTimestamp(key: string): void {
-  localStorage.setItem(`${key}${TIMESTAMP_SUFFIX}`, Date.now().toString());
-}
-
-/**
- * Set a value in localStorage with an associated timestamp
- */
-export function setTimestampedValue(key: string, value: any): void {
-  localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
   localStorage.setItem(`${key}${TIMESTAMP_SUFFIX}`, Date.now().toString());
 }
 
@@ -56,14 +49,6 @@ export function getTimestampedValue(key: string): string | null {
   }
 
   return localStorage.getItem(key);
-}
-
-/**
- * Remove a value and its timestamp from localStorage
- */
-export function removeTimestampedValue(key: string): void {
-  localStorage.removeItem(key);
-  localStorage.removeItem(`${key}${TIMESTAMP_SUFFIX}`);
 }
 
 /**
@@ -108,36 +93,7 @@ export function cleanupTimestampedStorage(): void {
     }
 
     keysToRemove.forEach((key) => localStorage.removeItem(key));
-
-    if (keysToRemove.length > 0) {
-      console.log(`Cleaned up ${keysToRemove.length} old localStorage entries`);
-    }
   } catch (error) {
     console.error('Error during cleanup of timestamped storage:', error);
-  }
-}
-
-/**
- * Migration function to add timestamps to existing entries
- * This ensures existing entries don't get immediately cleaned up
- */
-export function migrateExistingEntries(): void {
-  const now = Date.now().toString();
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key) continue;
-
-    const isTimestampedKey = TIMESTAMPED_KEYS.some((prefix) => key.startsWith(prefix));
-
-    if (isTimestampedKey && !key.endsWith(TIMESTAMP_SUFFIX)) {
-      const timestampKey = `${key}${TIMESTAMP_SUFFIX}`;
-      const hasTimestamp = localStorage.getItem(timestampKey);
-
-      if (!hasTimestamp) {
-        // Add timestamp to existing entry
-        localStorage.setItem(timestampKey, now);
-      }
-    }
   }
 }

@@ -1,6 +1,6 @@
 const rateLimit = require('express-rate-limit');
-const { limiterCache } = require('@librechat/api');
 const { ViolationTypes } = require('librechat-data-provider');
+const { limiterCache, removePorts, getRateLimitReset } = require('@librechat/api');
 const denyRequest = require('~/server/middleware/denyRequest');
 const { logViolation } = require('~/cache');
 
@@ -36,6 +36,7 @@ const createHandler = (ip = true) => {
       max: ip ? ipMax : userMax,
       limiter: ip ? 'ip' : 'user',
       windowInMinutes: ip ? ipWindowInMinutes : userWindowInMinutes,
+      ...getRateLimitReset(req.rateLimit, ip ? ipWindowMs : userWindowMs),
     };
 
     await logViolation(req, res, type, errorMessage, score);
@@ -50,6 +51,7 @@ const ipLimiterOptions = {
   windowMs: ipWindowMs,
   max: ipMax,
   handler: createHandler(),
+  keyGenerator: removePorts,
   store: limiterCache('message_ip_limiter'),
 };
 
@@ -58,7 +60,7 @@ const userLimiterOptions = {
   max: userMax,
   handler: createHandler(false),
   keyGenerator: function (req) {
-    return req.user?.id; // Use the user ID or NULL if not available
+    return req.user?.id;
   },
   store: limiterCache('message_user_limiter'),
 };
@@ -73,7 +75,45 @@ const messageIpLimiter = rateLimit(ipLimiterOptions);
  */
 const messageUserLimiter = rateLimit(userLimiterOptions);
 
+/**
+ * Event admission has its own API-principal bucket. The durable worker later
+ * consumes the normal message-user bucket when it executes the delivery, so
+ * sharing that limiter here would charge every event twice.
+ */
+let configuredAgentEventUserLimiter;
+const agentEventUserLimiter = (req, res, next) => {
+  if (configuredAgentEventUserLimiter == null) {
+    const max = Number(process.env.AGENT_EVENT_USER_MAX ?? 40);
+    const windowInMinutes = Number(process.env.AGENT_EVENT_USER_WINDOW ?? 1);
+    configuredAgentEventUserLimiter = rateLimit({
+      windowMs: windowInMinutes * 60 * 1000,
+      max,
+      handler: (limitedReq, limitedRes) => {
+        const { retryAfterSeconds } = getRateLimitReset(
+          limitedReq.rateLimit,
+          windowInMinutes * 60 * 1000,
+        );
+        limitedRes.set('Retry-After', String(retryAfterSeconds));
+        return limitedRes
+          .status(429)
+          .type('application/json')
+          .json({
+            error: {
+              code: 'agent_event_rate_limited',
+              message: 'Agent event admission rate limit exceeded.',
+              type: 'rate_limit_error',
+            },
+          });
+      },
+      keyGenerator: (limitedReq) => String(limitedReq.apiKeyId ?? limitedReq.user?.id),
+      store: limiterCache('agent_event_user_limiter'),
+    });
+  }
+  return configuredAgentEventUserLimiter(req, res, next);
+};
+
 module.exports = {
+  agentEventUserLimiter,
   messageIpLimiter,
   messageUserLimiter,
 };

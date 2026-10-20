@@ -1,28 +1,60 @@
 import React from 'react';
-import { EarthIcon } from 'lucide-react';
+import { Pin, PinOff } from 'lucide';
+import { MorphIcon } from '@librechat/client';
+import { VisuallyHidden } from '@ariakit/react';
+import { CheckCircle2, EarthIcon } from 'lucide-react';
 import { isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
 import type { Endpoint } from '~/common';
 import { useModelSelectorContext } from '../ModelSelectorContext';
 import { CustomMenuItem as MenuItem } from '../CustomMenu';
+import useActiveItem from '../useActiveItem';
+import { useLocalize } from '~/hooks';
+import { cn } from '~/utils';
 
 interface EndpointModelItemProps {
   modelId: string | null;
   endpoint: Endpoint;
-  isSelected: boolean;
+  /** Resolved by the parent from the same array it maps, so the row does not rescan it. */
+  isGlobal?: boolean;
+  isFavorite: boolean;
+  onToggleFavorite: (modelId: string) => void;
+  /**
+   * Only set when the list is virtualized. The mounted rows are then a small window over
+   * a much larger set, so the position a screen reader would infer from the DOM is wrong;
+   * these carry the real position and total. Left undefined otherwise, where the DOM holds
+   * every option and the implicit values are already correct.
+   */
+  posInSet?: number;
+  setSize?: number;
 }
 
-export function EndpointModelItem({ modelId, endpoint, isSelected }: EndpointModelItemProps) {
-  const { handleSelectModel } = useModelSelectorContext();
-  let isGlobal = false;
+function EndpointModelItemComponent({
+  modelId,
+  endpoint,
+  isGlobal = false,
+  isFavorite,
+  onToggleFavorite,
+  posInSet,
+  setSize,
+}: EndpointModelItemProps) {
+  const localize = useLocalize();
+  const { handleSelectModel, selectedValues } = useModelSelectorContext();
+  const {
+    endpoint: selectedEndpoint,
+    model: selectedModel,
+    modelSpec: selectedSpec,
+  } = selectedValues;
+  const isSelected =
+    !selectedSpec && selectedEndpoint === endpoint.value && selectedModel === modelId;
+
+  const { ref: itemRef, isActive } = useActiveItem<HTMLDivElement>();
+
   let modelName = modelId;
   const avatarUrl = endpoint?.modelIcons?.[modelId ?? ''] || null;
 
   // Use custom names if available
   if (endpoint && modelId && isAgentsEndpoint(endpoint.value) && endpoint.agentNames?.[modelId]) {
     modelName = endpoint.agentNames[modelId];
-
-    const modelInfo = endpoint?.models?.find((m) => m.name === modelId);
-    isGlobal = modelInfo?.isGlobal ?? false;
   } else if (
     endpoint &&
     modelId &&
@@ -32,68 +64,124 @@ export function EndpointModelItem({ modelId, endpoint, isSelected }: EndpointMod
     modelName = endpoint.assistantNames[modelId];
   }
 
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!modelId) {
+      return;
+    }
+    onToggleFavorite(modelId);
+  };
+
+  const renderAvatar = () => {
+    const isAgentOrAssistant =
+      isAgentsEndpoint(endpoint.value) || isAssistantsEndpoint(endpoint.value);
+    const showEndpointIcon = isAgentOrAssistant && endpoint.icon;
+
+    const getContent = () => {
+      if (avatarUrl) {
+        return <img src={avatarUrl} alt={modelName ?? ''} className="h-full w-full object-cover" />;
+      }
+      if (showEndpointIcon) {
+        return endpoint.icon;
+      }
+      return null;
+    };
+
+    const content = getContent();
+    if (!content) {
+      return null;
+    }
+
+    return (
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full">
+        {content}
+      </div>
+    );
+  };
+
   return (
     <MenuItem
-      key={modelId}
+      ref={itemRef}
       onClick={() => handleSelectModel(endpoint, modelId ?? '')}
-      className="flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm"
+      aria-selected={isSelected || undefined}
+      aria-posinset={posInSet}
+      aria-setsize={setSize}
+      className="group flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm"
     >
       <div className="flex w-full min-w-0 items-center gap-2 px-1 py-1">
-        {avatarUrl ? (
-          <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
-            <img src={avatarUrl} alt={modelName ?? ''} className="h-full w-full object-cover" />
-          </div>
-        ) : (isAgentsEndpoint(endpoint.value) || isAssistantsEndpoint(endpoint.value)) &&
-          endpoint.icon ? (
-          <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center overflow-hidden rounded-full">
-            {endpoint.icon}
-          </div>
-        ) : null}
-        <span className="truncate text-left">{modelName}</span>
-        {isGlobal && (
-          <EarthIcon className="ml-auto size-4 flex-shrink-0 self-center text-green-400" />
-        )}
+        {renderAvatar()}
+        <span className="truncate">{modelName}</span>
+        {isGlobal && <EarthIcon className="text-surface-submit ml-1 size-4" />}
       </div>
+      <button
+        type="button"
+        tabIndex={isActive ? 0 : -1}
+        onClick={handleFavoriteClick}
+        aria-label={isFavorite ? localize('com_ui_unpin') : localize('com_ui_pin')}
+        className={cn(
+          'hover:bg-surface-hover focus-visible:ring-ring-primary text-text-secondary rounded-md p-1 focus-visible:ring-2 focus-visible:outline-hidden focus-visible:ring-inset',
+          isFavorite
+            ? 'visible'
+            : // Visible by default so it's tappable on touch (no hover to
+              // reveal it); only hidden-until-hover where no pointer is coarse,
+              // so a 2-in-1's touchscreen keeps it beside its hovering trackpad.
+              // A hover-gated child would otherwise make the whole item
+              // hover-dependent, so the first tap only reveals it and a second
+              // tap is needed to select (the iOS double-tap).
+              'no-touch:invisible group-focus-within:visible group-hover:visible group-data-[active-item]:visible',
+        )}
+      >
+        <MorphIcon icon={isFavorite ? PinOff : Pin} className="h-4 w-4" />
+      </button>
       {isSelected && (
-        <div className="flex-shrink-0 self-center">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="block"
-          >
-            <path
-              fillRule="evenodd"
-              clipRule="evenodd"
-              d="M2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12ZM16.0755 7.93219C16.5272 8.25003 16.6356 8.87383 16.3178 9.32549L11.5678 16.0755C11.3931 16.3237 11.1152 16.4792 10.8123 16.4981C10.5093 16.517 10.2142 16.3973 10.0101 16.1727L7.51006 13.4227C7.13855 13.014 7.16867 12.3816 7.57733 12.0101C7.98598 11.6386 8.61843 11.6687 8.98994 12.0773L10.6504 13.9039L14.6822 8.17451C15 7.72284 15.6238 7.61436 16.0755 7.93219Z"
-              fill="currentColor"
-            />
-          </svg>
-        </div>
+        <>
+          <CheckCircle2 className="text-text-primary size-4 shrink-0" aria-hidden="true" />
+          <VisuallyHidden>{localize('com_a11y_selected')}</VisuallyHidden>
+        </>
       )}
     </MenuItem>
   );
 }
 
+export const EndpointModelItem = React.memo(EndpointModelItemComponent);
+
+/**
+ * Above this many rows the list is windowed. Below it, rendering everything keeps
+ * Ariakit's composite registry complete, so arrow-key navigation and typeahead
+ * reach every row — which is the behaviour virtualization has to work to preserve.
+ */
+export const VIRTUALIZE_THRESHOLD = 100;
+
 export function renderEndpointModels(
   endpoint: Endpoint | null,
   models: Array<{ name: string; isGlobal?: boolean }>,
-  selectedModel: string | null,
   filteredModels?: string[],
+  endpointIndex?: number,
+  favorites?: {
+    isFavorite: (modelId: string) => boolean;
+    onToggleFavorite: (modelId: string) => void;
+  },
 ) {
+  if (!endpoint) {
+    return null;
+  }
   const modelsToRender = filteredModels || models.map((model) => model.name);
+  const indexSuffix = endpointIndex != null ? `-${endpointIndex}` : '';
+  const isFavorite = favorites?.isFavorite ?? (() => false);
+  const onToggleFavorite = favorites?.onToggleFavorite ?? (() => {});
 
-  return modelsToRender.map(
-    (modelId) =>
-      endpoint && (
-        <EndpointModelItem
-          key={modelId}
-          modelId={modelId}
-          endpoint={endpoint}
-          isSelected={selectedModel === modelId}
-        />
-      ),
-  );
+  /** `models` carries `isGlobal`; without this map each row rescanned the whole
+   *  array to recover it, which is quadratic in the number of agents. */
+  const globalByName = new Map(models.map((model) => [model.name, model.isGlobal ?? false]));
+
+  return modelsToRender.map((modelId, modelIndex) => (
+    <EndpointModelItem
+      key={`${endpoint.value}${indexSuffix}-${modelId}-${modelIndex}`}
+      modelId={modelId}
+      endpoint={endpoint}
+      isGlobal={globalByName.get(modelId) ?? false}
+      isFavorite={isFavorite(modelId)}
+      onToggleFavorite={onToggleFavorite}
+    />
+  ));
 }

@@ -8,7 +8,7 @@ import { getResourceConfig } from '~/utils';
 
 /**
  * Hook to manage resource permission state including current shares, public access, and mutations
- * @param resourceType - Type of resource (e.g., ResourceType.AGENT, ResourceType.PROMPTGROUP)
+ * @param resourceType - Type of resource (e.g., ResourceType.AGENT, ResourceType.PROMPTGROUP, ResourceType.MCPSERVER)
  * @param resourceDbId - Database ID of the resource
  * @param isModalOpen - Whether the modal is open (for effect dependencies)
  * @returns Object with permission state and update mutation
@@ -26,7 +26,9 @@ export const useResourcePermissionState = (
   const {
     data: permissionsData,
     isLoading: isLoadingPermissions,
+    isFetching: isFetchingPermissions,
     error: permissionsError,
+    refetch: refetchPermissions,
   } = useGetResourcePermissionsQuery(resourceType, resourceDbId || '', {
     enabled: isValidResourceId,
   });
@@ -45,6 +47,7 @@ export const useResourcePermissionState = (
       description: principal.description,
       accessRoleId: principal.accessRoleId,
       idOnTheSource: principal.idOnTheSource,
+      viewInsights: principal.viewInsights,
     })) || [];
 
   const currentIsPublic = permissionsData?.public ?? false;
@@ -68,7 +71,9 @@ export const useResourcePermissionState = (
     config,
     permissionsData,
     isLoadingPermissions,
+    isFetchingPermissions,
     permissionsError,
+    refetchPermissions,
     updatePermissionsMutation,
     currentShares,
     currentIsPublic,

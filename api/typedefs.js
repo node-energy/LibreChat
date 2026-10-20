@@ -162,25 +162,25 @@
 
 /**
  * @exports BaseMessage
- * @typedef {import('@langchain/core/messages').BaseMessage} BaseMessage
+ * @typedef {import('@librechat/agents/langchain/messages').BaseMessage} BaseMessage
  * @memberof typedefs
  */
 
 /**
  * @exports UsageMetadata
- * @typedef {import('@langchain/core/messages').UsageMetadata} UsageMetadata
+ * @typedef {import('@librechat/agents/langchain/messages').UsageMetadata} UsageMetadata
  * @memberof typedefs
  */
 
 /**
  * @exports LangChainToolCall
- * @typedef {import('@langchain/core/messages/tool').ToolCall} LangChainToolCall
+ * @typedef {import('@librechat/agents/langchain/messages/tool').ToolCall} LangChainToolCall
  * @memberof typedefs
  */
 
 /**
  * @exports GraphRunnableConfig
- * @typedef {import('@langchain/core/runnables').RunnableConfig<{
+ * @typedef {import('@librechat/agents/langchain/runnables').RunnableConfig<{
  *  req: ServerRequest;
  * thread_id: string;
  * run_id: string;
@@ -194,12 +194,6 @@
  * }> & {
  * toolCall?: LangChainToolCall & { stepId?: string };
  * }} GraphRunnableConfig
- * @memberof typedefs
- */
-
-/**
- * @exports Ollama
- * @typedef {import('ollama').Ollama} Ollama
  * @memberof typedefs
  */
 
@@ -284,12 +278,6 @@
 /**
  * @exports ChatCompletionPayload
  * @typedef {import('openai').OpenAI.ChatCompletionCreateParams} ChatCompletionPayload
- * @memberof typedefs
- */
-
-/**
- * @exports OllamaMessage
- * @typedef {import('ollama').Message} OllamaMessage
  * @memberof typedefs
  */
 
@@ -933,6 +921,7 @@
  *   signal?: AbortSignal,
  *   memory?: ConversationSummaryBufferMemory,
  *   tool_resources?: AgentToolResources,
+ *   jobCreatedAt?: number,
  *   web_search?: ReturnType<typeof import('~/server/services/Tools/search').createOnSearchResults>,
  * }} LoadToolOptions
  * @memberof typedefs
@@ -1114,6 +1103,18 @@
  */
 
 /**
+ * @exports BalanceReservation
+ * @typedef {import('@librechat/api').BalanceReservation} BalanceReservation
+ * @memberof typedefs
+ */
+
+/**
+ * @exports BalanceReservations
+ * @typedef {import('@librechat/api').BalanceReservations} BalanceReservations
+ * @memberof typedefs
+ */
+
+/**
  * @exports Keyv
  * @typedef {import('keyv')} Keyv
  * @memberof typedefs
@@ -1265,12 +1266,6 @@
  */
 
 /**
- * @exports OpenAISpecClient
- * @typedef {import('./app/clients/OpenAIClient')} OpenAISpecClient
- * @memberof typedefs
- */
-
-/**
  * @exports TAgentClient
  * @typedef {import('./server/controllers/agents/client')} TAgentClient
  * @memberof typedefs
@@ -1293,6 +1288,7 @@
  * @property {string} [proxy] - Proxy configuration
  * @property {Object} [tools] - Available tools for the agent
  * @property {Object} [eventHandlers] - Custom event handlers
+ * @property {import('@librechat/api').AgentStartupTelemetry} [startupTelemetry] - Startup latency recorder
  * @property {Object} [addParams] - Additional parameters to add to requests
  * @property {string[]} [dropParams] - Parameters to remove from requests
  * @memberof typedefs
@@ -1496,15 +1492,10 @@
 /**
  * @exports EndpointServiceConfig
  * @typedef {Object} EndpointServiceConfig
- * @property {string} openAIApiKey - The API key for OpenAI.
- * @property {string} azureOpenAIApiKey - The API key for Azure OpenAI.
- * @property {boolean} useAzurePlugins - Flag to indicate if Azure plugins are used.
- * @property {boolean} userProvidedOpenAI - Flag to indicate if OpenAI API key is user provided.
  * @property {string} googleKey - The Palm key.
  * @property {boolean|{userProvide: boolean}} [openAI] - Flag to indicate if OpenAI endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [assistant] - Flag to indicate if Assistant endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [azureOpenAI] - Flag to indicate if Azure OpenAI endpoint is user provided, or its configuration.
- * @property {boolean|{userProvide: boolean}} [chatGPTBrowser] - Flag to indicate if ChatGPT Browser endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [anthropic] - Flag to indicate if Anthropic endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [google] - Flag to indicate if Google endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean, userProvideURL: boolean, name: string}} [custom] - Custom Endpoint configuration.
@@ -1520,22 +1511,11 @@
  */
 
 /**
- * @exports GptPlugins
- * @typedef {Object} GptPlugins
- * @property {Plugin[]} plugins - An array of plugins available.
- * @property {string[]} availableAgents - Available agents, 'classic' or 'functions'.
- * @property {boolean} userProvide - A flag indicating if the user has provided the data.
- * @property {boolean} azure - A flag indicating if azure plugins are used.
- * @memberof typedefs
- */
-
-/**
  * @exports DefaultConfig
  * @typedef {Object} DefaultConfig
  * @property {boolean|{userProvide: boolean}} [openAI] - Flag to indicate if OpenAI endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [assistant] - Flag to indicate if Assistant endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [azureOpenAI] - Flag to indicate if Azure OpenAI endpoint is user provided, or its configuration.
- * @property {boolean|{userProvide: boolean}} [chatGPTBrowser] - Flag to indicate if ChatGPT Browser endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [anthropic] - Flag to indicate if Anthropic endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean}} [google] - Flag to indicate if Google endpoint is user provided, or its configuration.
  * @property {boolean|{userProvide: boolean, userProvideURL: boolean, name: string}} [custom] - Custom Endpoint configuration.

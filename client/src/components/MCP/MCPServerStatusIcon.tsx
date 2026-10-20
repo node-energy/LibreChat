@@ -1,8 +1,9 @@
 import React from 'react';
-import { Spinner } from '@librechat/client';
-import { SettingsIcon, AlertTriangle, KeyRound, PlugZap, X } from 'lucide-react';
-import type { MCPServerStatus, TPlugin } from 'librechat-data-provider';
+import { KeyRound, PlugZap, X } from 'lucide-react';
+import { Button, Spinner, TooltipAnchor } from '@librechat/client';
+import type { MCPServerStatus } from 'librechat-data-provider';
 import { useLocalize } from '~/hooks';
+import { cn } from '~/utils';
 
 let localize: ReturnType<typeof useLocalize>;
 
@@ -16,34 +17,48 @@ interface InitializingStatusProps extends StatusIconProps {
   canCancel: boolean;
 }
 
-interface MCPServerStatusIconProps {
+export interface MCPServerStatusIconProps {
   serverName: string;
   serverStatus?: MCPServerStatus;
-  tool?: TPlugin;
   onConfigClick: (e: React.MouseEvent) => void;
   isInitializing: boolean;
   canCancel: boolean;
   onCancel: (e: React.MouseEvent) => void;
   hasCustomUserVars?: boolean;
+  /** When true, renders as a small status dot for compact layouts */
+  compact?: boolean;
 }
 
 /**
- * Renders the appropriate status icon for an MCP server based on its state
+ * Renders the appropriate status icon for an MCP server based on its state.
+ *
+ * Unified icon system:
+ * - PlugZap: making the connection (for disconnected servers)
+ * - KeyRound: the credentials the server asks this user for
+ * - Spinner: Loading state (during connection)
+ * - X: Cancel (during OAuth flow, shown on hover over spinner)
  */
 export default function MCPServerStatusIcon({
   serverName,
   serverStatus,
-  tool,
   onConfigClick,
   isInitializing,
   canCancel,
   onCancel,
   hasCustomUserVars = false,
+  compact = false,
 }: MCPServerStatusIconProps) {
   localize = useLocalize();
+
+  // Compact mode: render as a small status dot
+  if (compact) {
+    return <CompactStatusDot serverStatus={serverStatus} isInitializing={isInitializing} />;
+  }
+
+  // Loading state: show spinner (with cancel option if available)
   if (isInitializing) {
     return (
-      <InitializingStatusIcon
+      <LoadingStatusIcon
         serverName={serverName}
         onConfigClick={onConfigClick}
         onCancel={onCancel}
@@ -56,136 +71,160 @@ export default function MCPServerStatusIcon({
     return null;
   }
 
-  const { connectionState, requiresOAuth } = serverStatus;
+  const { connectionState, requestScoped } = serverStatus;
 
+  // Connecting: show spinner, with cancel when an OAuth flow is pending.
   if (connectionState === 'connecting') {
-    return <ConnectingStatusIcon serverName={serverName} onConfigClick={onConfigClick} />;
-  }
-
-  if (connectionState === 'disconnected') {
-    if (requiresOAuth) {
-      return <DisconnectedOAuthStatusIcon serverName={serverName} onConfigClick={onConfigClick} />;
-    }
-    return <DisconnectedStatusIcon serverName={serverName} onConfigClick={onConfigClick} />;
-  }
-
-  if (connectionState === 'error') {
-    return <ErrorStatusIcon serverName={serverName} onConfigClick={onConfigClick} />;
-  }
-
-  if (connectionState === 'connected') {
-    // Only show config button if there are customUserVars to configure
-    if (hasCustomUserVars) {
-      const isAuthenticated = tool?.authenticated || requiresOAuth;
+    if (canCancel) {
       return (
-        <AuthenticatedStatusIcon
+        <LoadingStatusIcon
           serverName={serverName}
           onConfigClick={onConfigClick}
-          isAuthenticated={isAuthenticated}
+          onCancel={onCancel}
+          canCancel={canCancel}
         />
       );
     }
-    return null; // No config button for connected servers without customUserVars
+
+    return <ConnectingSpinner serverName={serverName} />;
   }
 
+  // Request-scoped servers can only be connected while serving an MCP request.
+  if ((connectionState === 'disconnected' || connectionState === 'error') && requestScoped) {
+    return hasCustomUserVars ? (
+      <ConfigureButton serverName={serverName} onConfigClick={onConfigClick} />
+    ) : null;
+  }
+
+  // Disconnected or Error: show connect button (PlugZap icon)
+  if (connectionState === 'disconnected' || connectionState === 'error') {
+    return <ConnectButton serverName={serverName} onConfigClick={onConfigClick} />;
+  }
+
+  // Connected: only show config button if there are custom vars to configure
+  if (connectionState === 'connected' && hasCustomUserVars) {
+    return <ConfigureButton serverName={serverName} onConfigClick={onConfigClick} />;
+  }
+
+  // Connected without custom vars: no action needed, status shown via dot
   return null;
 }
 
-function InitializingStatusIcon({ serverName, onCancel, canCancel }: InitializingStatusProps) {
+interface CompactStatusDotProps {
+  serverStatus?: MCPServerStatus;
+  isInitializing: boolean;
+}
+
+function CompactStatusDot({ serverStatus, isInitializing }: CompactStatusDotProps) {
+  if (isInitializing) {
+    return (
+      /** `status-info` rather than `-strong`: the strong slot is a neutral grey
+       *  in both standard palettes, so using it turned this blue dot grey. The
+       *  pulse takes the on-status ink so it inverts with the fill. */
+      <div className="border-surface-secondary bg-status-info flex size-3.5 items-center justify-center rounded-full border-2">
+        <div className="bg-text-on-status size-1.5 animate-pulse rounded-full" />
+      </div>
+    );
+  }
+
+  if (!serverStatus) {
+    return (
+      <div className="border-surface-secondary bg-status-neutral size-3 rounded-full border-2" />
+    );
+  }
+
+  const { connectionState, requiresOAuth } = serverStatus;
+
+  let colorClass = 'bg-status-neutral';
+  if (connectionState === 'connecting') {
+    colorClass = 'bg-status-info';
+  } else if (serverStatus.requestScoped) {
+    colorClass = 'bg-status-info';
+  } else if (connectionState === 'connected') {
+    colorClass = 'bg-status-success';
+  } else if (connectionState === 'error') {
+    colorClass = 'bg-status-error';
+  } else if (connectionState === 'disconnected' && requiresOAuth) {
+    colorClass = 'bg-status-warning';
+  }
+
+  return (
+    <div className={cn('border-surface-secondary size-3 rounded-full border-2', colorClass)} />
+  );
+}
+
+function LoadingStatusIcon({ serverName, onCancel, canCancel }: InitializingStatusProps) {
   if (canCancel) {
     return (
-      <button
-        type="button"
-        onClick={onCancel}
-        className="group flex h-6 w-6 items-center justify-center rounded p-1 hover:bg-red-100 dark:hover:bg-red-900/20"
-        aria-label={localize('com_ui_cancel')}
-        title={localize('com_ui_cancel')}
-      >
-        <div className="relative h-4 w-4">
-          <Spinner className="h-4 w-4 group-hover:opacity-0" />
-          <X className="absolute inset-0 h-4 w-4 text-red-500 opacity-0 group-hover:opacity-100" />
-        </div>
-      </button>
+      <TooltipAnchor
+        description={localize('com_ui_cancel')}
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCancel}
+            className="group hover:bg-status-error-subtle size-6 rounded p-1"
+            aria-label={localize('com_ui_cancel')}
+          >
+            <div className="relative size-4">
+              <Spinner tone="primary" className="size-4 group-hover:opacity-0" />
+              <X className="text-text-destructive absolute inset-0 size-4 opacity-0 group-hover:opacity-100" />
+            </div>
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <div className="flex h-6 w-6 items-center justify-center rounded p-1">
+    <div className="flex size-6 items-center justify-center rounded p-1">
       <Spinner
-        className="h-4 w-4"
+        tone="primary"
+        className="size-4"
         aria-label={localize('com_nav_mcp_status_connecting', { 0: serverName })}
       />
     </div>
   );
 }
 
-function ConnectingStatusIcon({ serverName }: StatusIconProps) {
+function ConnectingSpinner({ serverName }: { serverName: string }) {
   return (
-    <div className="flex h-6 w-6 items-center justify-center rounded p-1">
+    <div className="flex size-6 items-center justify-center rounded p-1">
       <Spinner
-        className="h-4 w-4"
+        tone="primary"
+        className="size-4"
         aria-label={localize('com_nav_mcp_status_connecting', { 0: serverName })}
       />
     </div>
   );
 }
 
-function DisconnectedOAuthStatusIcon({ serverName, onConfigClick }: StatusIconProps) {
+/** Connect button - shown for disconnected/error states. Uses PlugZap icon. */
+function ConnectButton({ serverName, onConfigClick }: StatusIconProps) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={onConfigClick}
-      className="flex h-6 w-6 items-center justify-center rounded p-1 hover:bg-surface-secondary"
-      aria-label={localize('com_nav_mcp_configure_server', { 0: serverName })}
+      className="hover:bg-surface-secondary size-6 rounded p-1"
+      aria-label={localize('com_nav_mcp_connect_server', { 0: serverName })}
     >
-      <KeyRound className="h-4 w-4 text-amber-500" />
-    </button>
+      <PlugZap className="text-text-secondary size-4" aria-hidden="true" />
+    </Button>
   );
 }
 
-function DisconnectedStatusIcon({ serverName, onConfigClick }: StatusIconProps) {
+/** Configure button - shown for connected servers with custom vars. Uses KeyRound icon. */
+function ConfigureButton({ serverName, onConfigClick }: StatusIconProps) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="icon"
       onClick={onConfigClick}
-      className="flex h-6 w-6 items-center justify-center rounded p-1 hover:bg-surface-secondary"
+      className="hover:bg-surface-secondary size-6 rounded p-1"
       aria-label={localize('com_nav_mcp_configure_server', { 0: serverName })}
     >
-      <PlugZap className="h-4 w-4 text-orange-500" />
-    </button>
-  );
-}
-
-function ErrorStatusIcon({ serverName, onConfigClick }: StatusIconProps) {
-  return (
-    <button
-      type="button"
-      onClick={onConfigClick}
-      className="flex h-6 w-6 items-center justify-center rounded p-1 hover:bg-surface-secondary"
-      aria-label={localize('com_nav_mcp_configure_server', { 0: serverName })}
-    >
-      <AlertTriangle className="h-4 w-4 text-red-500" />
-    </button>
-  );
-}
-
-interface AuthenticatedStatusProps extends StatusIconProps {
-  isAuthenticated: boolean;
-}
-
-function AuthenticatedStatusIcon({
-  serverName,
-  onConfigClick,
-  isAuthenticated,
-}: AuthenticatedStatusProps) {
-  return (
-    <button
-      type="button"
-      onClick={onConfigClick}
-      className="flex h-6 w-6 items-center justify-center rounded p-1 hover:bg-surface-secondary"
-      aria-label={localize('com_nav_mcp_configure_server', { 0: serverName })}
-    >
-      <SettingsIcon className={`h-4 w-4 ${isAuthenticated ? 'text-green-500' : 'text-gray-400'}`} />
-    </button>
+      <KeyRound className="text-text-secondary size-4" aria-hidden="true" />
+    </Button>
   );
 }

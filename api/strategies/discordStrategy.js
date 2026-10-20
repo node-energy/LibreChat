@@ -1,4 +1,5 @@
 const { Strategy: DiscordStrategy } = require('passport-discord');
+const { createOAuthStateStore } = require('@librechat/api');
 const socialLogin = require('./socialLogin');
 
 const getProfileDetails = ({ profile }) => {
@@ -22,15 +23,31 @@ const getProfileDetails = ({ profile }) => {
 };
 
 const discordLogin = socialLogin('discord', getProfileDetails);
+const discordAdminLogin = socialLogin('discord', getProfileDetails, { existingUsersOnly: true });
 
-module.exports = () =>
+const getDiscordConfig = (callbackURL) => ({
+  clientID: process.env.DISCORD_CLIENT_ID,
+  clientSecret: process.env.DISCORD_CLIENT_SECRET,
+  callbackURL,
+  scope: ['identify', 'email'],
+  authorizationURL: 'https://discord.com/api/oauth2/authorize?prompt=none',
+});
+
+/** @param {Omit<import('@librechat/api').OAuthStateStoreOptions, 'provider'>} stateOptions */
+const discordStrategy = (stateOptions) =>
   new DiscordStrategy(
     {
-      clientID: process.env.DISCORD_CLIENT_ID,
-      clientSecret: process.env.DISCORD_CLIENT_SECRET,
-      callbackURL: `${process.env.DOMAIN_SERVER}${process.env.DISCORD_CALLBACK_URL}`,
-      scope: ['identify', 'email'],
-      authorizationURL: 'https://discord.com/api/oauth2/authorize?prompt=none',
+      ...getDiscordConfig(`${process.env.DOMAIN_SERVER}${process.env.DISCORD_CALLBACK_URL}`),
+      store: createOAuthStateStore({ ...stateOptions, provider: 'discord' }),
     },
     discordLogin,
   );
+
+const discordAdminStrategy = () =>
+  new DiscordStrategy(
+    getDiscordConfig(`${process.env.DOMAIN_SERVER}/api/admin/oauth/discord/callback`),
+    discordAdminLogin,
+  );
+
+module.exports = discordStrategy;
+module.exports.discordAdminLogin = discordAdminStrategy;

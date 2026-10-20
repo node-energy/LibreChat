@@ -3,7 +3,7 @@ import type { Response, Page, BrowserContext } from '@playwright/test';
 
 const basePath = 'http://localhost:3080/c/';
 const initialUrl = `${basePath}new`;
-const endpoints = ['google', 'openAI', 'azureOpenAI', 'chatGPTBrowser', 'gptPlugins'];
+const endpoints = ['google', 'openAI', 'azureOpenAI'];
 const endpoint = endpoints[1];
 
 function isUUID(uuid: string) {
@@ -96,11 +96,12 @@ test.describe('Messaging suite', () => {
     const updatedTextElement = page.getByText(editText);
     expect(updatedTextElement).toBeTruthy();
 
-    // Check edit response
+    // Check edit response. Nothing is typed into the editor, so the submit button reads
+    // "Rerun": reissuing an untouched request is a supported action, not a disabled one.
     await page.getByRole('button', { name: 'edit' }).click();
     const editResponsePromise = [
       page.waitForResponse(waitForServerStream),
-      await page.getByRole('button', { name: 'Save & Submit' }).click(),
+      await page.getByRole('button', { name: 'Rerun', exact: true }).click(),
     ];
 
     const [editResponse] = (await Promise.all(editResponsePromise)) as [Response];

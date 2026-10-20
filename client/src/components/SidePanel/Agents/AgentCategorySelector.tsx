@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import { ControlCombobox } from '@librechat/client';
 import {
   useWatch,
@@ -77,6 +77,7 @@ const AgentCategorySelector: React.FC<{ className?: string }> = ({ className }) 
 
         return (
           <ControlCombobox
+            selectId="category-selector"
             selectedValue={field.value}
             displayValue={displayValue}
             searchPlaceholder={searchPlaceholder}
@@ -95,4 +96,10 @@ const AgentCategorySelector: React.FC<{ className?: string }> = ({ className }) 
   );
 };
 
-export default AgentCategorySelector;
+const MemoizedAgentCategorySelector = memo(
+  AgentCategorySelector,
+  (prevProps, nextProps) => prevProps.className === nextProps.className,
+);
+MemoizedAgentCategorySelector.displayName = 'AgentCategorySelector';
+
+export default MemoizedAgentCategorySelector;

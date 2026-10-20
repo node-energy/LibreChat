@@ -6,20 +6,24 @@ jest.mock('@librechat/data-schemas', () => ({
     debug: jest.fn(),
     error: jest.fn(),
   },
+  tenantStorage: { run: (_store, fn) => fn() },
 }));
 
 jest.mock('@librechat/api', () => ({
-  // isEnabled used for TLS flags
+  findLdapUser: jest.requireActual('@librechat/api').findLdapUser,
+  provisionLdapUser: jest.requireActual('@librechat/api').provisionLdapUser,
   isEnabled: jest.fn(() => false),
   isEmailDomainAllowed: jest.fn(() => true),
   getBalanceConfig: jest.fn(() => ({ enabled: false })),
+  resolveAppConfigForUser: jest.fn(async (_getAppConfig, _user) => ({})),
 }));
 
 jest.mock('~/models', () => ({
   findUser: jest.fn(),
-  createUser: jest.fn(),
+  createUserIfAbsent: jest.fn(),
   updateUser: jest.fn(),
   countUsers: jest.fn(),
+  findBalanceByUser: jest.fn(),
 }));
 
 jest.mock('~/server/services/Config', () => ({
@@ -30,14 +34,15 @@ jest.mock('~/server/services/Config', () => ({
 let verifyCallback;
 jest.mock('passport-ldapauth', () => {
   return jest.fn().mockImplementation((options, verify) => {
-    verifyCallback = verify; // capture the strategy verify function
+    verifyCallback = verify;
     return { name: 'ldap', options, verify };
   });
 });
 
 const { ErrorTypes } = require('librechat-data-provider');
-const { isEmailDomainAllowed } = require('@librechat/api');
-const { findUser, createUser, updateUser, countUsers } = require('~/models');
+const { isEmailDomainAllowed, resolveAppConfigForUser } = require('@librechat/api');
+const { findUser, updateUser, countUsers, createUserIfAbsent } = require('~/models');
+const { getAppConfig } = require('~/server/services/Config');
 
 // Helper to call the verify callback and wrap in a Promise for convenience
 const callVerify = (userinfo) =>
@@ -67,7 +72,9 @@ describe('ldapStrategy', () => {
 
     // Default model/domain mocks
     findUser.mockReset().mockResolvedValue(null);
-    createUser.mockReset().mockResolvedValue('newUserId');
+    createUserIfAbsent
+      .mockReset()
+      .mockImplementation(async (data) => ({ ok: true, value: { _id: 'newUserId', ...data } }));
     updateUser.mockReset().mockImplementation(async (id, user) => ({ _id: id, ...user }));
     countUsers.mockReset().mockResolvedValue(0);
     isEmailDomainAllowed.mockReset().mockReturnValue(true);
@@ -89,7 +96,7 @@ describe('ldapStrategy', () => {
     const { user } = await callVerify(userinfo);
 
     expect(user.email).toBe('first@example.com');
-    expect(createUser).toHaveBeenCalledWith(
+    expect(createUserIfAbsent).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'ldap',
         ldapId: 'uid123',
@@ -116,7 +123,8 @@ describe('ldapStrategy', () => {
 
     expect(user).toBe(false);
     expect(info).toEqual({ message: ErrorTypes.AUTH_FAILED });
-    expect(createUser).not.toHaveBeenCalled();
+    expect(createUserIfAbsent).not.toHaveBeenCalled();
+    expect(resolveAppConfigForUser).not.toHaveBeenCalled();
   });
 
   it('updates an existing ldap user with current LDAP info', async () => {
@@ -139,7 +147,7 @@ describe('ldapStrategy', () => {
 
     const { user } = await callVerify(userinfo);
 
-    expect(createUser).not.toHaveBeenCalled();
+    expect(createUserIfAbsent).not.toHaveBeenCalled();
     expect(updateUser).toHaveBeenCalledWith(
       'u2',
       expect.objectContaining({
@@ -158,7 +166,6 @@ describe('ldapStrategy', () => {
       uid: 'uid999',
       givenName: 'John',
       cn: 'John Doe',
-      // no mail and no custom LDAP_EMAIL
     };
 
     const { user } = await callVerify(userinfo);
@@ -179,5 +186,143 @@ describe('ldapStrategy', () => {
     const { user, info } = await callVerify(userinfo);
     expect(user).toBe(false);
     expect(info).toEqual({ message: 'Email domain not allowed' });
+  });
+
+  it('passes getAppConfig and found user to resolveAppConfigForUser', async () => {
+    const existing = {
+      _id: 'u3',
+      provider: 'ldap',
+      email: 'tenant@example.com',
+      ldapId: 'uid-tenant',
+      username: 'tenantuser',
+      name: 'Tenant User',
+      tenantId: 'tenant-a',
+      role: 'USER',
+    };
+    findUser.mockResolvedValue(existing);
+
+    const userinfo = {
+      uid: 'uid-tenant',
+      mail: 'tenant@example.com',
+      givenName: 'Tenant',
+      cn: 'Tenant User',
+    };
+
+    await callVerify(userinfo);
+
+    expect(resolveAppConfigForUser).toHaveBeenCalledWith(getAppConfig, existing);
+  });
+
+  it('uses baseConfig for new user without calling resolveAppConfigForUser', async () => {
+    findUser.mockResolvedValue(null);
+
+    const userinfo = {
+      uid: 'uid-new',
+      mail: 'newuser@example.com',
+      givenName: 'New',
+      cn: 'New User',
+    };
+
+    await callVerify(userinfo);
+
+    expect(resolveAppConfigForUser).not.toHaveBeenCalled();
+    expect(getAppConfig).toHaveBeenCalledWith({ baseOnly: true });
+  });
+
+  it('should block login when tenant config restricts the domain', async () => {
+    const existing = {
+      _id: 'u-blocked',
+      provider: 'ldap',
+      ldapId: 'uid-tenant',
+      tenantId: 'tenant-strict',
+      role: 'USER',
+    };
+    findUser.mockResolvedValue(existing);
+    resolveAppConfigForUser.mockResolvedValue({
+      registration: { allowedDomains: ['other.com'] },
+    });
+    isEmailDomainAllowed.mockReturnValueOnce(true).mockReturnValueOnce(false);
+
+    const userinfo = { uid: 'uid-tenant', mail: 'user@example.com', givenName: 'Test', cn: 'Test' };
+    const { user, info } = await callVerify(userinfo);
+
+    expect(user).toBe(false);
+    expect(info).toEqual({ message: 'Email domain not allowed' });
+  });
+
+  describe('concurrent first login', () => {
+    const userinfo = {
+      uid: 'uid-race',
+      mail: 'race@example.com',
+      givenName: 'Race',
+      cn: 'Race User',
+    };
+
+    const raceCreateWith = (existingUser) => {
+      let created = false;
+      findUser.mockImplementation(async (query) =>
+        created && query.ldapId === existingUser.ldapId ? existingUser : null,
+      );
+      createUserIfAbsent.mockImplementation(async () => {
+        created = true;
+        return { ok: false, error: { code: 'user_exists' } };
+      });
+    };
+
+    it("continues as the other request's account with this login's LDAP values", async () => {
+      raceCreateWith({
+        _id: 'winner-id',
+        provider: 'ldap',
+        ldapId: 'uid-race',
+        email: 'old@example.com',
+        username: 'old-username',
+        name: 'Old Name',
+        role: 'USER',
+      });
+
+      const { user } = await callVerify(userinfo);
+
+      expect(createUserIfAbsent).toHaveBeenCalledTimes(1);
+      expect(updateUser).toHaveBeenCalledWith(
+        'winner-id',
+        expect.objectContaining({
+          ldapId: 'uid-race',
+          email: 'race@example.com',
+          username: 'Race',
+          name: 'Race User',
+          role: 'USER',
+        }),
+      );
+      expect(user).toEqual(expect.objectContaining({ _id: 'winner-id' }));
+    });
+
+    it("fails the login when the recovered tenant account's policy rejects the email", async () => {
+      getAppConfig.mockImplementation(async (options) =>
+        options?.tenantId ? { registration: { allowedDomains: ['other.example'] } } : {},
+      );
+      raceCreateWith({
+        _id: 'tenant-id',
+        provider: 'ldap',
+        ldapId: 'uid-race',
+        tenantId: 'tenant-a',
+      });
+
+      const { user, info } = await callVerify(userinfo);
+
+      expect(user).toBe(false);
+      expect(info).toEqual({ message: 'Email domain not allowed' });
+      expect(updateUser).not.toHaveBeenCalled();
+      getAppConfig.mockResolvedValue({});
+    });
+
+    it('fails the login when the recovered account belongs to another provider', async () => {
+      raceCreateWith({ _id: 'google-id', provider: 'google', ldapId: 'uid-race' });
+
+      const { user, info } = await callVerify(userinfo);
+
+      expect(user).toBe(false);
+      expect(info).toEqual({ message: ErrorTypes.AUTH_FAILED });
+      expect(updateUser).not.toHaveBeenCalled();
+    });
   });
 });

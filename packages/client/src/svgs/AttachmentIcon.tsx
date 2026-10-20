@@ -1,4 +1,10 @@
-export default function AttachmentIcon({ className = '' }) {
+import { JSX } from 'react/jsx-runtime';
+
+export default function AttachmentIcon({
+  className = '',
+}: {
+  className?: string | undefined;
+}): JSX.Element {
   return (
     <svg
       width="24"
@@ -7,6 +13,7 @@ export default function AttachmentIcon({ className = '' }) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

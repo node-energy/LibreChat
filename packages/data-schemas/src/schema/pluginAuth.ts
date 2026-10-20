@@ -18,8 +18,14 @@ const pluginAuthSchema: Schema<IPluginAuth> = new Schema(
     pluginKey: {
       type: String,
     },
+    tenantId: {
+      type: String,
+      index: true,
+    },
   },
   { timestamps: true },
 );
+
+pluginAuthSchema.index({ userId: 1, pluginKey: 1, authField: 1, tenantId: 1 });
 
 export default pluginAuthSchema;

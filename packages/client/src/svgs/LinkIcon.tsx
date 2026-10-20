@@ -1,4 +1,6 @@
-export default function LinkIcon() {
+import { JSX } from 'react/jsx-runtime';
+
+export default function LinkIcon(): JSX.Element {
   return (
     <svg
       width="18"
@@ -7,6 +9,7 @@ export default function LinkIcon() {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className="icon-md"
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

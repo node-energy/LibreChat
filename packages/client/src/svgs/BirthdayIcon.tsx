@@ -1,7 +1,12 @@
 import React from 'react';
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils/';
 
-export default function BirthdayIcon({ className = '' }) {
+export default function BirthdayIcon({
+  className = '',
+}: {
+  className?: string | undefined;
+}): JSX.Element {
   return (
     <svg
       version="1.1"
@@ -9,6 +14,7 @@ export default function BirthdayIcon({ className = '' }) {
       xmlns="http://www.w3.org/2000/svg"
       xmlnsXlink="http://www.w3.org/1999/xlink"
       className={cn('h-9 w-9', className)}
+      aria-hidden="true"
     >
       <defs>
         <linearGradient

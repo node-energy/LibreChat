@@ -1,4 +1,12 @@
-import { forwardRef, ReactNode, Ref } from 'react';
+import {
+  forwardRef,
+  ForwardRefExoticComponent,
+  isValidElement,
+  ReactNode,
+  Ref,
+  RefAttributes,
+} from 'react';
+import type { ComponentProps } from 'react';
 import {
   OGDialogTitle,
   OGDialogClose,
@@ -19,13 +27,39 @@ type SelectionProps = {
   isLoading?: boolean;
 };
 
+/**
+ * Type guard to check if selection is a legacy SelectionProps object
+ */
+function isSelectionProps(selection: unknown): selection is SelectionProps {
+  return (
+    typeof selection === 'object' &&
+    selection !== null &&
+    !isValidElement(selection) &&
+    ('selectHandler' in selection ||
+      'selectClasses' in selection ||
+      'selectText' in selection ||
+      'isLoading' in selection)
+  );
+}
+
 type DialogTemplateProps = {
   title: string;
   description?: string;
   main?: ReactNode;
   buttons?: ReactNode;
   leftButtons?: ReactNode;
-  selection?: SelectionProps;
+  /**
+   * Selection button configuration. Can be either:
+   * - An object with selectHandler, selectClasses, selectText, isLoading (legacy)
+   * - A ReactNode for custom selection component
+   * @example
+   * // Legacy usage
+   * selection={{ selectHandler: () => {}, selectText: 'Confirm' }}
+   * @example
+   * // Custom component
+   * selection={<Button onClick={handleConfirm}>Confirm</Button>}
+   */
+  selection?: SelectionProps | ReactNode;
   className?: string;
   overlayClassName?: string;
   headerClassName?: string;
@@ -33,10 +67,17 @@ type DialogTemplateProps = {
   footerClassName?: string;
   showCloseButton?: boolean;
   showCancelButton?: boolean;
+  cancelDisabled?: boolean;
   onClose?: () => void;
+  onOpenAutoFocus?: ComponentProps<typeof OGDialogContent>['onOpenAutoFocus'];
+  onCloseAutoFocus?: ComponentProps<typeof OGDialogContent>['onCloseAutoFocus'];
+  onEscapeKeyDown?: ComponentProps<typeof OGDialogContent>['onEscapeKeyDown'];
+  onInteractOutside?: ComponentProps<typeof OGDialogContent>['onInteractOutside'];
 };
 
-const OGDialogTemplate = forwardRef((props: DialogTemplateProps, ref: Ref<HTMLDivElement>) => {
+const OGDialogTemplate: ForwardRefExoticComponent<
+  DialogTemplateProps & RefAttributes<HTMLDivElement>
+> = forwardRef((props: DialogTemplateProps, ref: Ref<HTMLDivElement>) => {
   const localize = useLocalize();
   const {
     title,
@@ -49,20 +90,53 @@ const OGDialogTemplate = forwardRef((props: DialogTemplateProps, ref: Ref<HTMLDi
     mainClassName,
     headerClassName,
     footerClassName,
-    showCloseButton,
+    showCloseButton = false,
     overlayClassName,
     showCancelButton = true,
+    cancelDisabled = false,
+    onOpenAutoFocus,
+    onCloseAutoFocus,
+    onEscapeKeyDown,
+    onInteractOutside,
   } = props;
-  const { selectHandler, selectClasses, selectText, isLoading } = selection || {};
+  const isLegacySelection = isSelectionProps(selection);
+  const legacySelection = isLegacySelection ? selection : null;
+  const { selectHandler, selectClasses, selectText, isLoading } = legacySelection ?? {};
 
   const defaultSelect =
-    'bg-gray-800 text-white transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-200 dark:text-gray-800 dark:hover:bg-gray-200';
+    'bg-button-primary text-text-inverted transition-colors hover:bg-button-primary-hover disabled:cursor-not-allowed disabled:opacity-50';
+
+  let selectionContent = null;
+  if (isLegacySelection) {
+    selectionContent = (
+      <OGDialogClose
+        onClick={selectHandler}
+        disabled={isLoading}
+        className={`${
+          selectClasses ?? defaultSelect
+        } h-theme-button flex items-center justify-center rounded-lg border-none px-4 py-2 text-sm disabled:opacity-80 max-sm:order-first max-sm:w-full sm:order-none`}
+      >
+        {isLoading === true ? (
+          <Spinner className="size-theme-icon" />
+        ) : (
+          (selectText as React.JSX.Element)
+        )}
+      </OGDialogClose>
+    );
+  } else if (selection) {
+    selectionContent = selection;
+  }
+
   return (
     <OGDialogContent
       overlayClassName={overlayClassName}
       showCloseButton={showCloseButton}
+      onOpenAutoFocus={onOpenAutoFocus}
+      onCloseAutoFocus={onCloseAutoFocus}
+      onEscapeKeyDown={onEscapeKeyDown}
+      onInteractOutside={onInteractOutside}
       ref={ref}
-      className={cn('w-11/12 border-none bg-background text-foreground', className ?? '')}
+      className={cn('bg-surface-dialog text-text-primary w-11/12', className ?? '')}
       onClick={(e) => e.stopPropagation()}
     >
       <OGDialogHeader className={cn(headerClassName ?? '')}>
@@ -75,38 +149,22 @@ const OGDialogTemplate = forwardRef((props: DialogTemplateProps, ref: Ref<HTMLDi
       </OGDialogHeader>
       <div className={cn('px-0 py-2', mainClassName)}>{main != null ? main : null}</div>
       <OGDialogFooter className={footerClassName}>
-        <div>
-          {leftButtons != null ? (
-            <div className="mt-3 flex h-auto gap-3 max-sm:w-full max-sm:flex-col sm:mt-0 sm:flex-row">
-              {leftButtons}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex h-auto gap-3 max-sm:w-full max-sm:flex-col sm:flex-row">
-          {showCancelButton && (
-            <OGDialogClose asChild>
-              <Button variant="outline" aria-label={localize('com_ui_cancel')}>
-                {localize('com_ui_cancel')}
-              </Button>
-            </OGDialogClose>
-          )}
-          {buttons != null ? buttons : null}
-          {selection ? (
-            <OGDialogClose
-              onClick={selectHandler}
-              disabled={isLoading}
-              className={`${
-                selectClasses ?? defaultSelect
-              } flex h-10 items-center justify-center rounded-lg border-none px-4 py-2 text-sm disabled:opacity-80 max-sm:order-first max-sm:w-full sm:order-none`}
+        {leftButtons != null ? (
+          <div className="mr-auto flex flex-row gap-2">{leftButtons}</div>
+        ) : null}
+        {showCancelButton && (
+          <OGDialogClose asChild>
+            <Button
+              variant="outline"
+              aria-label={localize('com_ui_cancel')}
+              disabled={cancelDisabled}
             >
-              {isLoading === true ? (
-                <Spinner className="size-4 text-white" />
-              ) : (
-                (selectText as React.JSX.Element)
-              )}
-            </OGDialogClose>
-          ) : null}
-        </div>
+              {localize('com_ui_cancel')}
+            </Button>
+          </OGDialogClose>
+        )}
+        {buttons != null ? buttons : null}
+        {selectionContent}
       </OGDialogFooter>
     </OGDialogContent>
   );

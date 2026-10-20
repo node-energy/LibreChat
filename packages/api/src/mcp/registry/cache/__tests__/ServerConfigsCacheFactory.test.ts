@@ -1,11 +1,11 @@
-import { ServerConfigsCacheFactory } from '../ServerConfigsCacheFactory';
+import { ServerConfigsCacheFactory, APP_CACHE_NAMESPACE } from '../ServerConfigsCacheFactory';
+import { ServerConfigsCacheRedisAggregateKey } from '../ServerConfigsCacheRedisAggregateKey';
 import { ServerConfigsCacheInMemory } from '../ServerConfigsCacheInMemory';
-import { ServerConfigsCacheRedis } from '../ServerConfigsCacheRedis';
 import { cacheConfig } from '~/cache';
 
 // Mock the cache implementations
+jest.mock('../ServerConfigsCacheRedisAggregateKey');
 jest.mock('../ServerConfigsCacheInMemory');
-jest.mock('../ServerConfigsCacheRedis');
 
 // Mock the cache config module
 jest.mock('~/cache', () => ({
@@ -17,53 +17,36 @@ jest.mock('~/cache', () => ({
 describe('ServerConfigsCacheFactory', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    cacheConfig.USE_REDIS = false;
   });
 
   describe('create()', () => {
-    it('should return ServerConfigsCacheRedis when USE_REDIS is true', () => {
-      // Arrange
+    it('should return ServerConfigsCacheRedisAggregateKey for App namespace when USE_REDIS is true', () => {
       cacheConfig.USE_REDIS = true;
 
-      // Act
-      const cache = ServerConfigsCacheFactory.create('TestOwner', true);
+      const cache = ServerConfigsCacheFactory.create(APP_CACHE_NAMESPACE, false);
 
-      // Assert
-      expect(cache).toBeInstanceOf(ServerConfigsCacheRedis);
-      expect(ServerConfigsCacheRedis).toHaveBeenCalledWith('TestOwner', true);
+      expect(cache).toBeInstanceOf(ServerConfigsCacheRedisAggregateKey);
+      expect(ServerConfigsCacheRedisAggregateKey).toHaveBeenCalledWith(APP_CACHE_NAMESPACE, false);
+      expect(ServerConfigsCacheInMemory).not.toHaveBeenCalled();
     });
 
-    it('should return ServerConfigsCacheInMemory when USE_REDIS is false', () => {
-      // Arrange
+    it('should return ServerConfigsCacheInMemory for App namespace when USE_REDIS is false', () => {
       cacheConfig.USE_REDIS = false;
 
-      // Act
-      const cache = ServerConfigsCacheFactory.create('TestOwner', false);
+      const cache = ServerConfigsCacheFactory.create(APP_CACHE_NAMESPACE, false);
 
-      // Assert
       expect(cache).toBeInstanceOf(ServerConfigsCacheInMemory);
-      expect(ServerConfigsCacheInMemory).toHaveBeenCalled();
+      expect(ServerConfigsCacheInMemory).toHaveBeenCalledWith();
+      expect(ServerConfigsCacheRedisAggregateKey).not.toHaveBeenCalled();
     });
 
-    it('should pass correct parameters to ServerConfigsCacheRedis', () => {
-      // Arrange
-      cacheConfig.USE_REDIS = true;
-
-      // Act
-      ServerConfigsCacheFactory.create('App', true);
-
-      // Assert
-      expect(ServerConfigsCacheRedis).toHaveBeenCalledWith('App', true);
-    });
-
-    it('should create ServerConfigsCacheInMemory without parameters when USE_REDIS is false', () => {
-      // Arrange
+    it('should return ServerConfigsCacheInMemory for non-App namespaces when USE_REDIS is false', () => {
       cacheConfig.USE_REDIS = false;
 
-      // Act
-      ServerConfigsCacheFactory.create('User', false);
+      const cache = ServerConfigsCacheFactory.create('CustomNamespace', false);
 
-      // Assert
-      // In-memory cache doesn't use owner/leaderOnly parameters
+      expect(cache).toBeInstanceOf(ServerConfigsCacheInMemory);
       expect(ServerConfigsCacheInMemory).toHaveBeenCalledWith();
     });
   });

@@ -1,64 +1,71 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { TooltipAnchor } from '@librechat/client';
-import { MessageCircleDashed } from 'lucide-react';
-import { useRecoilState, useRecoilCallback } from 'recoil';
-import { useChatContext } from '~/Providers';
+import { HatGlasses } from 'lucide-react';
+import { Chip, TooltipAnchor } from '@librechat/client';
+import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
+import useTemporaryChat from '~/hooks/Conversations/useTemporaryChat';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
-import store from '~/store';
 
 export function TemporaryChat() {
   const localize = useLocalize();
-  const [isTemporary, setIsTemporary] = useRecoilState(store.isTemporary);
-  const { conversation, isSubmitting } = useChatContext();
+  const { show, isTemporary, isEnforced, toggle } = useTemporaryChat();
+  const tooltipDescription = useShortcutHint('toggleTemporaryChat', localize('com_ui_temporary'));
+  const ariaKey = useShortcutAriaKey('toggleTemporaryChat');
 
-  const temporaryBadge = {
-    id: 'temporary',
-    icon: MessageCircleDashed,
-    label: 'com_ui_temporary' as const,
-    atom: store.isTemporary,
-    isAvailable: true,
-  };
-
-  const handleBadgeToggle = useRecoilCallback(
-    () => () => {
-      setIsTemporary(!isTemporary);
-    },
-    [isTemporary],
-  );
-
-  if (
-    (Array.isArray(conversation?.messages) && conversation.messages.length >= 1) ||
-    isSubmitting
-  ) {
+  if (!show) {
     return null;
   }
+
+  const label = isEnforced ? localize('com_ui_temporary_enforced') : localize('com_ui_temporary');
 
   return (
     <div className="relative flex flex-wrap items-center gap-2">
       <TooltipAnchor
-        description={localize(temporaryBadge.label)}
+        description={isEnforced ? label : tooltipDescription}
         render={
           <button
-            onClick={handleBadgeToggle}
-            aria-label={localize(temporaryBadge.label)}
+            onClick={toggle}
+            aria-label={label}
+            aria-pressed={isTemporary}
+            aria-disabled={isEnforced}
+            aria-keyshortcuts={isEnforced ? undefined : ariaKey}
             className={cn(
-              'inline-flex size-10 flex-shrink-0 items-center justify-center rounded-xl border border-border-light text-text-primary transition-all ease-in-out hover:bg-surface-tertiary',
+              'border-border-chrome text-text-primary inline-flex size-9 shrink-0 items-center justify-center rounded-xl border transition-all ease-in-out',
               isTemporary
-                ? 'bg-surface-active shadow-md'
-                : 'bg-transparent shadow-sm hover:bg-surface-hover hover:shadow-md',
-              'active:shadow-inner',
+                ? 'bg-surface-active'
+                : 'bg-presentation hover:bg-surface-active-alt shadow-xs',
+              isEnforced && 'cursor-not-allowed',
             )}
           >
-            {temporaryBadge.icon && (
-              <temporaryBadge.icon
-                className={cn('relative h-5 w-5 md:h-4 md:w-4', !temporaryBadge.label && 'mx-auto')}
-              />
-            )}
+            <HatGlasses className="icon-md" aria-hidden="true" />
           </button>
         }
       />
     </div>
+  );
+}
+
+/** Once the first message is sent the toggle retires, so the active mode still
+ * needs a persistent, read-only cue in the header. `role="status"` carries the
+ * mode change to assistive technology, which matters most below `md` where the
+ * label is visually hidden and only the icon remains. */
+export function TemporaryChatIndicator() {
+  const localize = useLocalize();
+  const { isActive } = useTemporaryChat();
+
+  if (!isActive) {
+    return null;
+  }
+
+  return (
+    <Chip
+      role="status"
+      tone="neutral"
+      size="theme"
+      shape="theme"
+      className="shrink-0"
+      leading={<HatGlasses className="size-4 shrink-0" aria-hidden="true" />}
+    >
+      <span className="max-md:sr-only">{localize('com_ui_temporary')}</span>
+    </Chip>
   );
 }

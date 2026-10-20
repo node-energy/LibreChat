@@ -1,21 +1,26 @@
 const mongoose = require('mongoose');
-const { RoleBits, createModels } = require('@librechat/data-schemas');
+const { RoleBits, createModels, tenantStorage } = require('@librechat/data-schemas');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const {
   ResourceType,
   AccessRoleIds,
   PrincipalType,
   PrincipalModel,
+  PermissionBits,
 } = require('librechat-data-provider');
 const {
   bulkUpdateResourcePermissions,
+  syncUserEntraGroupMemberships,
   getEffectivePermissions,
   findAccessibleResources,
   getAvailableRoles,
   grantPermission,
   checkPermission,
+  ensurePrincipalExists,
+  ensureGroupPrincipalExists,
 } = require('./PermissionService');
-const { findRoleByIdentifier, getUserPrincipals, seedDefaultRoles } = require('~/models');
+const db = require('~/models');
+const { findRoleByIdentifier, getUserPrincipals, seedDefaultRoles } = db;
 
 // Mock the getTransactionSupport function for testing
 jest.mock('@librechat/data-schemas', () => ({
@@ -26,7 +31,12 @@ jest.mock('@librechat/data-schemas', () => ({
 
 // Mock GraphApiService to prevent config loading issues
 jest.mock('~/server/services/GraphApiService', () => ({
+  entraIdPrincipalFeatureEnabled: jest.fn().mockReturnValue(false),
+  getUserOwnedEntraGroups: jest.fn().mockResolvedValue([]),
+  getUserEntraGroups: jest.fn().mockResolvedValue([]),
+  getEntraGroupDetailsBatch: jest.fn().mockResolvedValue([]),
   getGroupMembers: jest.fn().mockResolvedValue([]),
+  getGroupOwners: jest.fn().mockResolvedValue([]),
 }));
 
 // Mock the logger
@@ -38,6 +48,8 @@ jest.mock('~/config', () => ({
 
 let mongoServer;
 let AclEntry;
+let User;
+let Group;
 
 beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();
@@ -52,6 +64,8 @@ beforeAll(async () => {
   Object.assign(mongoose.models, dbModels);
 
   AclEntry = dbModels.AclEntry;
+  User = dbModels.User;
+  Group = dbModels.Group;
 
   // Seed default roles
   await seedDefaultRoles();
@@ -234,6 +248,109 @@ describe('PermissionService', () => {
         resourceId,
       });
       expect(entries).toHaveLength(1);
+    });
+  });
+
+  describe('principal validation for ACL writes', () => {
+    beforeEach(async () => {
+      await User.deleteMany({ email: /acl-principal/i });
+      await Group.deleteMany({ name: /ACL Principal/i });
+    });
+
+    test('rejects a local user id outside the current request context', async () => {
+      const outsideUser = await User.create({
+        name: 'ACL Principal Outside User',
+        email: 'acl-principal-outside-user@example.com',
+        tenantId: 'tenant-b',
+      });
+
+      await expect(
+        tenantStorage.run({ tenantId: 'tenant-a' }, async () =>
+          ensurePrincipalExists({
+            type: PrincipalType.USER,
+            id: outsideUser._id.toString(),
+            name: 'Outside User',
+            source: 'local',
+          }),
+        ),
+      ).rejects.toThrow('User principal not found');
+    });
+
+    test('accepts a local user id in the current request context', async () => {
+      const currentUser = await User.create({
+        name: 'ACL Principal Current User',
+        email: 'acl-principal-current-user@example.com',
+        tenantId: 'tenant-a',
+      });
+
+      const principalId = await tenantStorage.run({ tenantId: 'tenant-a' }, async () =>
+        ensurePrincipalExists({
+          type: PrincipalType.USER,
+          id: currentUser._id.toString(),
+          name: 'Current User',
+          source: 'local',
+        }),
+      );
+
+      expect(principalId).toBe(currentUser._id.toString());
+    });
+
+    test('accepts a directory user already linked to the supplied source id', async () => {
+      const directoryUser = await User.create({
+        name: 'ACL Principal Directory User',
+        email: 'acl-principal-directory-user@example.com',
+        provider: 'openid',
+        idOnTheSource: 'directory-user-id',
+      });
+
+      const principalId = await ensurePrincipalExists({
+        type: PrincipalType.USER,
+        name: directoryUser.name,
+        email: directoryUser.email,
+        source: 'entra',
+        idOnTheSource: directoryUser.idOnTheSource,
+      });
+
+      expect(principalId).toBe(directoryUser._id.toString());
+    });
+
+    test('uses an existing user found only by email without linking its identity', async () => {
+      const existingUser = await User.create({
+        name: 'ACL Principal Existing User',
+        email: 'acl-principal-existing-user@example.com',
+        provider: 'local',
+      });
+
+      const principalId = await ensurePrincipalExists({
+        type: PrincipalType.USER,
+        name: existingUser.name,
+        email: existingUser.email,
+        source: 'entra',
+        idOnTheSource: 'unlinked-directory-id',
+      });
+
+      const unchangedUser = await User.findById(existingUser._id).lean();
+      expect(principalId).toBe(existingUser._id.toString());
+      expect(unchangedUser.provider).toBe('local');
+      expect(unchangedUser.idOnTheSource).toBeUndefined();
+    });
+
+    test('rejects a local group id outside the current request context', async () => {
+      const outsideGroup = await Group.create({
+        name: 'ACL Principal Outside Group',
+        tenantId: 'tenant-b',
+      });
+
+      await expect(
+        tenantStorage.run({ tenantId: 'tenant-a' }, async () =>
+          ensureGroupPrincipalExists({
+            type: PrincipalType.GROUP,
+            id: outsideGroup._id.toString(),
+            name: 'Outside Group',
+            source: 'local',
+          }),
+        ),
+      ).rejects.toThrow('Group principal not found');
     });
   });
 
@@ -557,6 +674,24 @@ describe('PermissionService', () => {
       });
     });
 
+    test('should forward idOnTheSource so principal resolution can skip the user lookup', async () => {
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+      ]);
+
+      await findAccessibleResources({
+        userId,
+        role: 'USER',
+        idOnTheSource: null,
+        resourceType: ResourceType.AGENT,
+        requiredPermissions: 1, // VIEW
+      });
+
+      expect(getUserPrincipals).toHaveBeenCalledWith(
+        expect.objectContaining({ idOnTheSource: null }),
+      );
+    });
+
     test('should find resources user can view', async () => {
       // Mock getUserPrincipals to return user principal
       getUserPrincipals.mockResolvedValue([
@@ -658,7 +793,9 @@ describe('PermissionService', () => {
         getAvailableRoles({
           resourceType: 'non_existent_type',
         }),
-      ).rejects.toThrow('Invalid resourceType: non_existent_type. Valid types: agent, promptGroup');
+      ).rejects.toThrow(
+        'Invalid resourceType: non_existent_type. Valid types: agent, codeEnvironment, promptGroup, mcpServer, remoteAgent, skill, sharedLink',
+      );
     });
   });
 
@@ -786,6 +923,189 @@ describe('PermissionService', () => {
       expect(groupEntry.roleId.accessRoleId).toBe(AccessRoleIds.AGENT_OWNER);
     });
 
+    test('adds, preserves, and removes agent Insights access independently of the role', async () => {
+      const grantResult = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          {
+            type: PrincipalType.USER,
+            id: userId,
+            accessRoleId: AccessRoleIds.AGENT_VIEWER,
+            viewInsights: true,
+          },
+        ],
+        grantedBy: grantedById,
+      });
+
+      let entry = await AclEntry.findOne({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      });
+      expect(entry.permBits & PermissionBits.VIEW_INSIGHTS).toBe(PermissionBits.VIEW_INSIGHTS);
+      expect(grantResult.insightsChanges).toEqual([
+        expect.objectContaining({ action: 'assigned' }),
+      ]);
+
+      const roleResult = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          {
+            type: PrincipalType.USER,
+            id: userId,
+            accessRoleId: AccessRoleIds.AGENT_EDITOR,
+          },
+        ],
+        grantedBy: grantedById,
+      });
+      entry = await AclEntry.findOne({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      });
+      expect(entry.permBits & PermissionBits.VIEW_INSIGHTS).toBe(PermissionBits.VIEW_INSIGHTS);
+      expect(roleResult.insightsChanges).toEqual([]);
+
+      const revokeResult = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          {
+            type: PrincipalType.USER,
+            id: userId,
+            accessRoleId: AccessRoleIds.AGENT_EDITOR,
+            viewInsights: false,
+          },
+        ],
+        grantedBy: grantedById,
+      });
+      entry = await AclEntry.findOne({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      });
+      expect(entry.permBits & PermissionBits.VIEW_INSIGHTS).toBe(0);
+      expect(revokeResult.insightsChanges).toEqual([
+        expect.objectContaining({ action: 'removed' }),
+      ]);
+    });
+
+    test.each([
+      {
+        updates: [true, false],
+        expectedInsights: 0,
+        expectedChanges: [],
+      },
+      {
+        updates: [false, true],
+        expectedInsights: PermissionBits.VIEW_INSIGHTS,
+        expectedChanges: [expect.objectContaining({ action: 'assigned' })],
+      },
+    ])(
+      'uses the last Insights value for duplicate principal updates',
+      async ({ updates, expectedInsights, expectedChanges }) => {
+        const results = await bulkUpdateResourcePermissions({
+          resourceType: ResourceType.AGENT,
+          resourceId,
+          updatedPrincipals: updates.map((viewInsights) => ({
+            type: PrincipalType.USER,
+            id: userId,
+            accessRoleId: AccessRoleIds.AGENT_VIEWER,
+            viewInsights,
+          })),
+          grantedBy: grantedById,
+        });
+
+        const entry = await AclEntry.findOne({
+          principalType: PrincipalType.USER,
+          principalId: userId,
+          resourceType: ResourceType.AGENT,
+          resourceId,
+        });
+        expect(entry.permBits & PermissionBits.VIEW_INSIGHTS).toBe(expectedInsights);
+        expect(results.granted).toHaveLength(1);
+        expect(results.insightsChanges).toEqual(expectedChanges);
+      },
+    );
+
+    test.each([
+      {
+        concurrentChange: 'grant',
+        initialInsights: false,
+        concurrentBitUpdate: { or: PermissionBits.VIEW_INSIGHTS },
+        expectedInsights: PermissionBits.VIEW_INSIGHTS,
+      },
+      {
+        concurrentChange: 'revocation',
+        initialInsights: true,
+        concurrentBitUpdate: { and: ~PermissionBits.VIEW_INSIGHTS },
+        expectedInsights: 0,
+      },
+    ])(
+      'atomically preserves a concurrent Insights $concurrentChange during a role-only update',
+      async ({ initialInsights, concurrentBitUpdate, expectedInsights }) => {
+        if (initialInsights) {
+          await AclEntry.updateOne(
+            {
+              principalType: PrincipalType.USER,
+              principalId: userId,
+              resourceType: ResourceType.AGENT,
+              resourceId,
+            },
+            { $bit: { permBits: { or: PermissionBits.VIEW_INSIGHTS } } },
+          );
+        }
+
+        const originalBulkWriteAclEntries = AclEntry.bulkWrite.bind(AclEntry);
+        const bulkWriteSpy = jest
+          .spyOn(AclEntry, 'bulkWrite')
+          .mockImplementationOnce(async (...args) => {
+            await AclEntry.updateOne(
+              {
+                principalType: PrincipalType.USER,
+                principalId: userId,
+                resourceType: ResourceType.AGENT,
+                resourceId,
+              },
+              { $bit: { permBits: concurrentBitUpdate } },
+            );
+            return originalBulkWriteAclEntries(...args);
+          });
+
+        try {
+          await bulkUpdateResourcePermissions({
+            resourceType: ResourceType.AGENT,
+            resourceId,
+            updatedPrincipals: [
+              {
+                type: PrincipalType.USER,
+                id: userId,
+                accessRoleId: AccessRoleIds.AGENT_EDITOR,
+              },
+            ],
+            grantedBy: grantedById,
+          });
+          expect(bulkWriteSpy).toHaveBeenCalled();
+        } finally {
+          bulkWriteSpy.mockRestore();
+        }
+
+        const entry = await AclEntry.findOne({
+          principalType: PrincipalType.USER,
+          principalId: userId,
+          resourceType: ResourceType.AGENT,
+          resourceId,
+        }).populate('roleId', 'accessRoleId');
+        expect(entry.roleId.accessRoleId).toBe(AccessRoleIds.AGENT_EDITOR);
+        expect(entry.permBits & PermissionBits.VIEW_INSIGHTS).toBe(expectedInsights);
+      },
+    );
+
     test('should revoke specified permissions', async () => {
       const revokedPrincipals = [
         {
@@ -817,6 +1137,103 @@ describe('PermissionService', () => {
       expect(remainingEntries).toHaveLength(1);
       expect(remainingEntries[0].principalType).toBe(PrincipalType.USER);
       expect(remainingEntries[0].principalId.toString()).toBe(userId.toString());
+    });
+
+    test('grant wins over revoke when a principal is in both lists (prevents owner lockout, #14316)', async () => {
+      // Simulates the share dialog sending the owner in both updatedPrincipals (grant OWNER) and
+      // revokedPrincipals (e.g. from a client id/idOnTheSource mismatch). Grants flush before
+      // deletes, so without the guard the owner would be upserted and then deleted. The owner
+      // must keep access.
+      const results = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          {
+            type: PrincipalType.USER,
+            id: userId,
+            accessRoleId: AccessRoleIds.AGENT_OWNER,
+          },
+        ],
+        revokedPrincipals: [
+          {
+            type: PrincipalType.USER,
+            id: userId,
+          },
+        ],
+        grantedBy: grantedById,
+      });
+
+      expect(results.granted).toHaveLength(1);
+      // The revoke for the same principal is skipped, not applied, so it is absent from results.
+      expect(results.revoked).toHaveLength(0);
+      expect(results.errors).toHaveLength(0);
+
+      const userEntry = await AclEntry.findOne({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      }).populate('roleId', 'accessRoleId');
+      expect(userEntry).not.toBeNull();
+      expect(userEntry.roleId.accessRoleId).toBe(AccessRoleIds.AGENT_OWNER);
+    });
+
+    test('revoke wins for PUBLIC so an explicit public disable is honored (#14316)', async () => {
+      // A contradictory payload that both grants public and disables it puts the public principal
+      // in both lists. Unlike user/group principals, disabling public access must win so the
+      // resource is never left public when the caller asked to make it private.
+      const results = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          {
+            type: PrincipalType.PUBLIC,
+            accessRoleId: AccessRoleIds.AGENT_VIEWER,
+          },
+        ],
+        revokedPrincipals: [
+          {
+            type: PrincipalType.PUBLIC,
+          },
+        ],
+        grantedBy: grantedById,
+      });
+
+      expect(results.revoked).toHaveLength(1);
+      expect(results.errors).toHaveLength(0);
+
+      const publicEntry = await AclEntry.findOne({
+        principalType: PrincipalType.PUBLIC,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      });
+      expect(publicEntry).toBeNull();
+    });
+
+    test('records a malformed revoke entry in errors instead of throwing after grants flush (#14316)', async () => {
+      // A nullish/malformed entry in revokedPrincipals must not throw out of the function after
+      // grants have already been flushed; it is captured in results.errors and processing continues.
+      const results = await bulkUpdateResourcePermissions({
+        resourceType: ResourceType.AGENT,
+        resourceId,
+        updatedPrincipals: [
+          { type: PrincipalType.USER, id: otherUserId, accessRoleId: AccessRoleIds.AGENT_VIEWER },
+        ],
+        revokedPrincipals: [null],
+        grantedBy: grantedById,
+      });
+
+      expect(results.errors).toHaveLength(1);
+      expect(results.granted).toHaveLength(1);
+
+      // The valid grant still landed despite the malformed revoke entry.
+      const grantedEntry = await AclEntry.findOne({
+        principalType: PrincipalType.USER,
+        principalId: otherUserId,
+        resourceType: ResourceType.AGENT,
+        resourceId,
+      });
+      expect(grantedEntry).not.toBeNull();
     });
 
     test('should handle mixed operations (grant, update, revoke)', async () => {
@@ -1603,5 +2020,520 @@ describe('PermissionService', () => {
       // Should combine VIEW (1) and EDIT (3) permissions
       expect(effectivePermissions).toBe(3); // EDITOR includes VIEW
     });
+  });
+
+  describe('getResourcePermissionsMap - Batch Permission Queries', () => {
+    const { getResourcePermissionsMap } = require('./PermissionService');
+
+    beforeEach(async () => {
+      await AclEntry.deleteMany({});
+      getUserPrincipals.mockReset();
+    });
+
+    test('should get permissions for multiple resources in single query', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+      const resource2 = new mongoose.Types.ObjectId();
+      const resource3 = new mongoose.Types.ObjectId();
+
+      // Grant different permissions to different resources
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+        grantedBy: grantedById,
+      });
+
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource2,
+        accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+        grantedBy: grantedById,
+      });
+
+      // resource3 has no permissions
+
+      // Mock getUserPrincipals
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+        { principalType: PrincipalType.PUBLIC },
+      ]);
+
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [resource1, resource2, resource3],
+      });
+
+      expect(permissionsMap).toBeInstanceOf(Map);
+      expect(permissionsMap.size).toBe(2); // Only resource1 and resource2
+      expect(permissionsMap.get(resource1.toString())).toBe(1); // VIEW
+      expect(permissionsMap.get(resource2.toString())).toBe(3); // VIEW | EDIT
+      expect(permissionsMap.get(resource3.toString())).toBeUndefined();
+    });
+
+    test('should combine permissions from multiple principals', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+      const resource2 = new mongoose.Types.ObjectId();
+
+      // User has VIEW on both resources
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+        grantedBy: grantedById,
+      });
+
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource2,
+        accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+        grantedBy: grantedById,
+      });
+
+      // Group has EDIT on resource1
+      await grantPermission({
+        principalType: PrincipalType.GROUP,
+        principalId: groupId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+        grantedBy: grantedById,
+      });
+
+      // Mock getUserPrincipals with user + group
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+        { principalType: PrincipalType.GROUP, principalId: groupId },
+        { principalType: PrincipalType.PUBLIC },
+      ]);
+
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [resource1, resource2],
+      });
+
+      expect(permissionsMap.size).toBe(2);
+      // Resource1 should have VIEW (1) | EDIT (3) = 3
+      expect(permissionsMap.get(resource1.toString())).toBe(3);
+      // Resource2 should have only VIEW (1)
+      expect(permissionsMap.get(resource2.toString())).toBe(1);
+    });
+
+    test('should handle empty resource list', async () => {
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+      ]);
+
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [],
+      });
+
+      expect(permissionsMap).toBeInstanceOf(Map);
+      expect(permissionsMap.size).toBe(0);
+    });
+
+    test('should throw on invalid resource type', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+      ]);
+
+      // Validation errors should throw immediately
+      await expect(
+        getResourcePermissionsMap({
+          userId,
+          resourceType: 'invalid_type',
+          resourceIds: [resource1],
+        }),
+      ).rejects.toThrow('Invalid resourceType: invalid_type');
+    });
+
+    test('should include public permissions in batch query', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+      const resource2 = new mongoose.Types.ObjectId();
+
+      // User has VIEW | EDIT on resource1
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+        grantedBy: grantedById,
+      });
+
+      // Public has VIEW on resource2
+      await grantPermission({
+        principalType: PrincipalType.PUBLIC,
+        principalId: null,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource2,
+        accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+        grantedBy: grantedById,
+      });
+
+      // Mock getUserPrincipals with user + public
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+        { principalType: PrincipalType.PUBLIC },
+      ]);
+
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [resource1, resource2],
+      });
+
+      expect(permissionsMap.size).toBe(2);
+      expect(permissionsMap.get(resource1.toString())).toBe(3); // VIEW | EDIT
+      expect(permissionsMap.get(resource2.toString())).toBe(1); // VIEW (public)
+    });
+
+    test('should handle large batch efficiently', async () => {
+      // Create 50 resources
+      const resources = Array.from({ length: 50 }, () => new mongoose.Types.ObjectId());
+
+      // Grant permissions to first 30 resources
+      for (let i = 0; i < 30; i++) {
+        await grantPermission({
+          principalType: PrincipalType.USER,
+          principalId: userId,
+          resourceType: ResourceType.MCPSERVER,
+          resourceId: resources[i],
+          accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+          grantedBy: grantedById,
+        });
+      }
+
+      // Grant group permissions to resources 20-40 (overlap)
+      for (let i = 20; i < 40; i++) {
+        await grantPermission({
+          principalType: PrincipalType.GROUP,
+          principalId: groupId,
+          resourceType: ResourceType.MCPSERVER,
+          resourceId: resources[i],
+          accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+          grantedBy: grantedById,
+        });
+      }
+
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+        { principalType: PrincipalType.GROUP, principalId: groupId },
+      ]);
+
+      const startTime = Date.now();
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: resources,
+      });
+      const duration = Date.now() - startTime;
+
+      // Should complete in reasonable time (under 1 second)
+      expect(duration).toBeLessThan(1000);
+
+      // Verify results
+      expect(permissionsMap.size).toBe(40); // Resources 0-39 have permissions
+
+      // Resources 0-19: USER VIEW only
+      for (let i = 0; i < 20; i++) {
+        expect(permissionsMap.get(resources[i].toString())).toBe(1); // VIEW
+      }
+
+      // Resources 20-29: USER VIEW | GROUP EDIT = 3
+      for (let i = 20; i < 30; i++) {
+        expect(permissionsMap.get(resources[i].toString())).toBe(3); // VIEW | EDIT
+      }
+
+      // Resources 30-39: GROUP EDIT = 3
+      for (let i = 30; i < 40; i++) {
+        expect(permissionsMap.get(resources[i].toString())).toBe(3); // EDIT includes VIEW
+      }
+
+      // Resources 40-49: No permissions
+      for (let i = 40; i < 50; i++) {
+        expect(permissionsMap.get(resources[i].toString())).toBeUndefined();
+      }
+    });
+
+    test('should work with role parameter optimization', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+      const resource2 = new mongoose.Types.ObjectId();
+
+      // Grant permissions to ADMIN role
+      await grantPermission({
+        principalType: PrincipalType.ROLE,
+        principalId: 'ADMIN',
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_OWNER,
+        grantedBy: grantedById,
+      });
+
+      await grantPermission({
+        principalType: PrincipalType.ROLE,
+        principalId: 'ADMIN',
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource2,
+        accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+        grantedBy: grantedById,
+      });
+
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+        { principalType: PrincipalType.ROLE, principalId: 'ADMIN' },
+        { principalType: PrincipalType.PUBLIC },
+      ]);
+
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        role: 'ADMIN',
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [resource1, resource2],
+      });
+
+      expect(permissionsMap.size).toBe(2);
+      expect(permissionsMap.get(resource1.toString())).toBe(15); // OWNER = all bits
+      expect(permissionsMap.get(resource2.toString())).toBe(3); // EDIT
+      expect(getUserPrincipals).toHaveBeenCalledWith({ userId, role: 'ADMIN' });
+    });
+
+    test('should handle mixed ObjectId and string resource IDs', async () => {
+      const resource1 = new mongoose.Types.ObjectId();
+      const resource2 = new mongoose.Types.ObjectId();
+
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource1,
+        accessRoleId: AccessRoleIds.MCPSERVER_VIEWER,
+        grantedBy: grantedById,
+      });
+
+      await grantPermission({
+        principalType: PrincipalType.USER,
+        principalId: userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceId: resource2,
+        accessRoleId: AccessRoleIds.MCPSERVER_EDITOR,
+        grantedBy: grantedById,
+      });
+
+      getUserPrincipals.mockResolvedValue([
+        { principalType: PrincipalType.USER, principalId: userId },
+      ]);
+
+      // Pass mix of ObjectId and string
+      const permissionsMap = await getResourcePermissionsMap({
+        userId,
+        resourceType: ResourceType.MCPSERVER,
+        resourceIds: [resource1, resource2.toString()],
+      });
+
+      expect(permissionsMap.size).toBe(2);
+      expect(permissionsMap.get(resource1.toString())).toBe(1);
+      expect(permissionsMap.get(resource2.toString())).toBe(3);
+    });
+  });
+});
+
+describe('syncUserEntraGroupMemberships - $pullAll on Group.memberIds', () => {
+  const {
+    entraIdPrincipalFeatureEnabled,
+    getUserEntraGroups,
+  } = require('~/server/services/GraphApiService');
+  const { Group } = require('~/db/models');
+
+  const userEntraId = 'entra-user-001';
+  const user = {
+    openidId: 'openid-sub-001',
+    idOnTheSource: userEntraId,
+    provider: 'openid',
+  };
+
+  beforeEach(async () => {
+    await Group.deleteMany({});
+    entraIdPrincipalFeatureEnabled.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    entraIdPrincipalFeatureEnabled.mockReturnValue(false);
+    getUserEntraGroups.mockResolvedValue([]);
+  });
+
+  it('should add user to matching Entra groups and remove from non-matching ones', async () => {
+    await Group.create([
+      { name: 'Group A', source: 'entra', idOnTheSource: 'entra-group-a', memberIds: [] },
+      {
+        name: 'Group B',
+        source: 'entra',
+        idOnTheSource: 'entra-group-b',
+        memberIds: [userEntraId],
+      },
+      {
+        name: 'Group C',
+        source: 'entra',
+        idOnTheSource: 'entra-group-c',
+        memberIds: [userEntraId],
+      },
+    ]);
+
+    getUserEntraGroups.mockResolvedValue(['entra-group-a', 'entra-group-c']);
+
+    await syncUserEntraGroupMemberships(user, 'fake-access-token');
+
+    const groups = await Group.find({ source: 'entra' }).sort({ name: 1 }).lean();
+    expect(groups[0].memberIds).toContain(userEntraId);
+    expect(groups[1].memberIds).not.toContain(userEntraId);
+    expect(groups[2].memberIds).toContain(userEntraId);
+  });
+
+  it('establishes the user tenant context for the sync when tenantId is present', async () => {
+    const { getTenantId } = require('@librechat/data-schemas');
+    const observed = [];
+    getUserEntraGroups.mockImplementation(async () => {
+      observed.push(getTenantId());
+      return [];
+    });
+
+    await syncUserEntraGroupMemberships({ ...user, tenantId: 'tenant-42' }, 'fake-token');
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    expect(observed).toEqual(['tenant-42', undefined]);
+  });
+
+  it('should not modify groups when API returns empty list (early return)', async () => {
+    await Group.create([
+      {
+        name: 'Group X',
+        source: 'entra',
+        idOnTheSource: 'entra-x',
+        memberIds: [userEntraId, 'other-user'],
+      },
+      { name: 'Group Y', source: 'entra', idOnTheSource: 'entra-y', memberIds: [userEntraId] },
+    ]);
+
+    getUserEntraGroups.mockResolvedValue([]);
+
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    const groups = await Group.find({ source: 'entra' }).sort({ name: 1 }).lean();
+    expect(groups[0].memberIds).toContain(userEntraId);
+    expect(groups[0].memberIds).toContain('other-user');
+    expect(groups[1].memberIds).toContain(userEntraId);
+  });
+
+  it('should remove user from groups not in the API response via $pullAll', async () => {
+    await Group.create([
+      { name: 'Keep', source: 'entra', idOnTheSource: 'entra-keep', memberIds: [userEntraId] },
+      {
+        name: 'Remove',
+        source: 'entra',
+        idOnTheSource: 'entra-remove',
+        memberIds: [userEntraId, 'other-user'],
+      },
+    ]);
+
+    getUserEntraGroups.mockResolvedValue(['entra-keep']);
+
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    const keep = await Group.findOne({ idOnTheSource: 'entra-keep' }).lean();
+    const remove = await Group.findOne({ idOnTheSource: 'entra-remove' }).lean();
+    expect(keep.memberIds).toContain(userEntraId);
+    expect(remove.memberIds).not.toContain(userEntraId);
+    expect(remove.memberIds).toContain('other-user');
+  });
+
+  it('should not modify local groups', async () => {
+    await Group.create([
+      { name: 'Local Group', source: 'local', memberIds: [userEntraId] },
+      {
+        name: 'Entra Group',
+        source: 'entra',
+        idOnTheSource: 'entra-only',
+        memberIds: [userEntraId],
+      },
+    ]);
+
+    getUserEntraGroups.mockResolvedValue([]);
+
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    const localGroup = await Group.findOne({ source: 'local' }).lean();
+    expect(localGroup.memberIds).toContain(userEntraId);
+  });
+
+  it('should early-return when feature is disabled', async () => {
+    entraIdPrincipalFeatureEnabled.mockReturnValue(false);
+
+    await Group.create({
+      name: 'Should Not Touch',
+      source: 'entra',
+      idOnTheSource: 'entra-safe',
+      memberIds: [userEntraId],
+    });
+
+    getUserEntraGroups.mockResolvedValue([]);
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    const group = await Group.findOne({ idOnTheSource: 'entra-safe' }).lean();
+    expect(group.memberIds).toContain(userEntraId);
+  });
+
+  it('should handle mix of existing and missing groups correctly (regression test)', async () => {
+    // This is the critical bug fix: previously syncUserEntraGroups would remove user from existing groups
+    // when called with only missing groups. Now using upserts + bulkUpdate to avoid this issue.
+
+    const { getEntraGroupDetailsBatch } = require('~/server/services/GraphApiService');
+
+    // Create existing groups A and B
+    await Group.create([
+      { name: 'Group A', source: 'entra', idOnTheSource: 'entra-group-a', memberIds: [] },
+      { name: 'Group B', source: 'entra', idOnTheSource: 'entra-group-b', memberIds: [] },
+    ]);
+
+    // User is member of A, B, and C (but C doesn't exist yet)
+    getUserEntraGroups.mockResolvedValue(['entra-group-a', 'entra-group-b', 'entra-group-c']);
+
+    // Mock batch fetch to return details for missing group C
+    getEntraGroupDetailsBatch.mockResolvedValue([
+      {
+        id: 'entra-group-c',
+        name: 'Group C',
+        email: 'groupc@example.com',
+        description: 'Group C Description',
+      },
+    ]);
+
+    await syncUserEntraGroupMemberships(user, 'fake-token');
+
+    // Verify ALL three groups now have the user as member
+    const groupA = await Group.findOne({ idOnTheSource: 'entra-group-a' }).lean();
+    const groupB = await Group.findOne({ idOnTheSource: 'entra-group-b' }).lean();
+    const groupC = await Group.findOne({ idOnTheSource: 'entra-group-c' }).lean();
+
+    expect(groupA.memberIds).toContain(userEntraId);
+    expect(groupB.memberIds).toContain(userEntraId);
+    expect(groupC).toBeTruthy();
+    expect(groupC.memberIds).toContain(userEntraId);
+    expect(groupC.name).toBe('Group C');
+
+    // Reset mock
+    getEntraGroupDetailsBatch.mockResolvedValue([]);
   });
 });

@@ -1,6 +1,5 @@
 import { createContext, useContext } from 'react';
-import useAddedResponse from '~/hooks/Chat/useAddedResponse';
-type TAddedChatContext = ReturnType<typeof useAddedResponse>;
+import type { AddedChatContract } from '~/hooks/Chat/contract';
 
-export const AddedChatContext = createContext<TAddedChatContext>({} as TAddedChatContext);
+export const AddedChatContext = createContext<AddedChatContract>({} as AddedChatContract);
 export const useAddedChatContext = () => useContext(AddedChatContext);

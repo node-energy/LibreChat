@@ -1,14 +1,24 @@
 import type {
   TEndpoint,
-  FileSources,
+  FileStorage,
   TFileConfig,
   TAzureConfig,
   TCustomConfig,
+  TCredentialsConfig,
+  TChatProjectsConfig,
   TMemoryConfig,
   EModelEndpoint,
+  TVertexAIConfig,
   TAgentsEndpoint,
+  CloudFrontConfig,
   TCustomEndpoints,
   TAssistantEndpoint,
+  TAnthropicEndpoint,
+  SummarizationConfig,
+  TConversationListConfig,
+  TToolCallPreviewsConfig,
+  SkillSyncConfig,
+  FiltersConfig,
 } from 'librechat-data-provider';
 
 export type JsonSchemaType = {
@@ -54,14 +64,40 @@ export interface AppConfig {
   };
   /** Memory configuration */
   memory?: TMemoryConfig;
+  /** Summarization configuration */
+  summarization?: SummarizationConfig;
   /** Web search configuration */
   webSearch?: TCustomConfig['webSearch'];
-  /** File storage strategy ('local', 's3', 'firebase', 'azure_blob') */
-  fileStrategy: FileSources.local | FileSources.s3 | FileSources.firebase | FileSources.azure_blob;
+  githubCompare?: TCustomConfig['githubCompare'];
+  skillDeletion?: {
+    finalizationEnabled?: boolean;
+    sweepIntervalMs?: number;
+    claimLeaseMs?: number;
+    batchSize?: number;
+    recheckIntervalMs?: number;
+  };
+  /** Source-scoped content filter configuration */
+  filters?: FiltersConfig;
+  /** Message filter configuration (PII and future filter types) */
+  messageFilter?: TCustomConfig['messageFilter'];
+  /** Langfuse tracing configuration */
+  langfuse?: TCustomConfig['langfuse'];
+  /** Skill sync configuration */
+  skillSync?: SkillSyncConfig;
+  /** File storage strategy ('local', 's3', 'firebase', 'azure_blob', 'cloudfront') */
+  fileStrategy: FileStorage;
   /** File strategies configuration */
   fileStrategies?: TCustomConfig['fileStrategies'];
+  /** CloudFront CDN configuration */
+  cloudfront?: CloudFrontConfig;
+  /** Chat Projects limits resolved from the deployment configuration */
+  projects?: TChatProjectsConfig;
   /** Registration configurations */
   registration?: TCustomConfig['registration'];
+  /** Changing the registered email address */
+  emailChange?: TCustomConfig['emailChange'];
+  /** Passkey enrollment configuration */
+  passkeys?: TCustomConfig['passkeys'];
   /** Actions configurations */
   actions?: TCustomConfig['actions'];
   /** Admin-filtered tools */
@@ -82,25 +118,38 @@ export interface AppConfig {
   speech?: TCustomConfig['speech'];
   /** MCP server configuration */
   mcpConfig?: TCustomConfig['mcpServers'] | null;
+  /** MCP settings (domain allowlist, etc.) */
+  mcpSettings?: TCustomConfig['mcpSettings'] | null;
+  /** Deployment-owned MCP App sandbox transport limits. */
+  mcpAppSandbox?: TCustomConfig['mcpAppSandbox'];
   /** File configuration */
   fileConfig?: TFileConfig;
-  /** Secure image links configuration */
+  /** Secure image links configuration, enabled unless explicitly disabled */
   secureImageLinks?: TCustomConfig['secureImageLinks'];
+  /** Stored user credential write format, `v3` unless configured */
+  credentials?: TCredentialsConfig;
+  /** Validation limits for the conversation list's filter facets */
+  conversationList?: TConversationListConfig;
+  /** Bounds for the tool-call previews sent on conversation loads */
+  toolCallPreviews?: TToolCallPreviewsConfig;
   /** Processed model specifications */
   modelSpecs?: TCustomConfig['modelSpecs'];
   /** Available tools */
   availableTools?: Record<string, FunctionTool>;
   endpoints?: {
+    /** Admin exemption list of host:port pairs that bypass the SSRF private-IP block */
+    allowedAddresses?: string[];
     /** OpenAI endpoint configuration */
     openAI?: Partial<TEndpoint>;
     /** Google endpoint configuration */
     google?: Partial<TEndpoint>;
     /** Bedrock endpoint configuration */
     bedrock?: Partial<TEndpoint>;
-    /** Anthropic endpoint configuration */
-    anthropic?: Partial<TEndpoint>;
-    /** GPT plugins endpoint configuration */
-    gptPlugins?: Partial<TEndpoint>;
+    /** Anthropic endpoint configuration with optional Vertex AI support */
+    anthropic?: Partial<TAnthropicEndpoint> & {
+      /** Validated Vertex AI configuration */
+      vertexConfig?: TVertexAIConfig;
+    };
     /** Azure OpenAI endpoint configuration */
     azureOpenAI?: TAzureConfig;
     /** Assistants endpoint configuration */

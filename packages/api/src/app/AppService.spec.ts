@@ -9,6 +9,7 @@ import {
   defaultAgentCapabilities,
 } from 'librechat-data-provider';
 import type { TCustomConfig } from 'librechat-data-provider';
+import type { FunctionTool } from '@librechat/data-schemas';
 
 jest.mock('@librechat/data-schemas', () => ({
   ...jest.requireActual('@librechat/data-schemas'),
@@ -59,8 +60,26 @@ const azureGroups = [
   } as const,
 ];
 
+/** Default agent capabilities served when no `memory` block is configured —
+ *  `AppService` strips `memory` from the defaults since the capability is inert
+ *  without a memory config. */
+const defaultAgentCapabilitiesWithoutMemory = defaultAgentCapabilities.filter(
+  (capability) => capability !== AgentCapabilities.memory,
+);
+
 describe('AppService', () => {
-  const mockSystemTools = {
+  it('preserves comparison policy in the effective request configuration', async () => {
+    const githubCompare = { enabled: true, timeoutMs: 2000 };
+    expect((await AppService({ config: { githubCompare } })).githubCompare).toEqual(githubCompare);
+    expect((await AppService({ config: {} })).githubCompare).toBeUndefined();
+  });
+
+  it('preserves the YAML passkey cap in the effective configuration', async () => {
+    const result = await AppService({ config: { passkeys: { perUserMax: 2 } } });
+    expect(result?.passkeys).toEqual({ perUserMax: 2 });
+  });
+
+  const mockSystemTools: Record<string, FunctionTool> = {
     ExampleTool: {
       type: 'function',
       function: {
@@ -85,7 +104,7 @@ describe('AppService', () => {
   it('should correctly assign process.env and initialize app config based on custom config', async () => {
     const config: Partial<TCustomConfig> = {
       registration: { socialLogins: ['testLogin'] },
-      fileStrategy: 'testStrategy' as FileSources,
+      fileStrategy: FileSources.s3,
       balance: {
         enabled: true,
       },
@@ -93,28 +112,26 @@ describe('AppService', () => {
 
     const result = await AppService({ config, systemTools: mockSystemTools });
 
-    expect(process.env.CDN_PROVIDER).toEqual('testStrategy');
+    expect(process.env.CDN_PROVIDER).toEqual('s3');
 
     expect(result).toEqual(
       expect.objectContaining({
         config: expect.objectContaining({
-          fileStrategy: 'testStrategy',
+          fileStrategy: 's3',
         }),
         registration: expect.objectContaining({
           socialLogins: ['testLogin'],
         }),
-        fileStrategy: 'testStrategy',
+        fileStrategy: 's3',
         interfaceConfig: expect.objectContaining({
-          endpointsMenu: true,
           modelSelect: true,
           parameters: true,
-          sidePanel: true,
           presets: true,
         }),
         mcpConfig: null,
         imageOutputType: expect.any(String),
         fileConfig: undefined,
-        secureImageLinks: undefined,
+        secureImageLinks: true,
         balance: { enabled: true },
         filteredTools: undefined,
         includedTools: undefined,
@@ -133,7 +150,7 @@ describe('AppService', () => {
         endpoints: expect.objectContaining({
           agents: expect.objectContaining({
             disableBuilder: false,
-            capabilities: expect.arrayContaining([...defaultAgentCapabilities]),
+            capabilities: expect.arrayContaining([...defaultAgentCapabilitiesWithoutMemory]),
             maxCitations: 30,
             maxCitationsPerFile: 7,
             minRelevanceScore: 0.45,
@@ -157,6 +174,14 @@ describe('AppService', () => {
     );
   });
 
+  it('should require authentication for image links unless explicitly disabled', async () => {
+    const secureResult = await AppService({ config: {} });
+    const legacyResult = await AppService({ config: { secureImageLinks: false } });
+
+    expect(secureResult.secureImageLinks).toBe(true);
+    expect(legacyResult.secureImageLinks).toBe(false);
+  });
+
   it('should default to `PNG` `imageOutputType` with no provided type', async () => {
     const config = {
       version: '0.10.0',
@@ -177,6 +202,43 @@ describe('AppService', () => {
     expect(result).toEqual(
       expect.objectContaining({
         imageOutputType: EImageOutputType.PNG,
+      }),
+    );
+  });
+
+  it('should enable summarization when it is configured without enabled flag', async () => {
+    const config = {
+      summarization: {
+        prompt: 'Summarize with emphasis on next actions',
+      },
+    } as Partial<TCustomConfig> & { summarization: Record<string, unknown> };
+
+    const result = await AppService({ config });
+    expect(result).toEqual(
+      expect.objectContaining({
+        summarization: expect.objectContaining({
+          enabled: true,
+          prompt: 'Summarize with emphasis on next actions',
+        }),
+      }),
+    );
+  });
+
+  it('should preserve explicit summarization disable flag', async () => {
+    const config = {
+      summarization: {
+        enabled: false,
+        prompt: 'Ignored while disabled',
+      },
+    } as Partial<TCustomConfig> & { summarization: Record<string, unknown> };
+
+    const result = await AppService({ config });
+    expect(result).toEqual(
+      expect.objectContaining({
+        summarization: expect.objectContaining({
+          enabled: false,
+          prompt: 'Ignored while disabled',
+        }),
       }),
     );
   });
@@ -277,7 +339,7 @@ describe('AppService', () => {
         endpoints: expect.objectContaining({
           [EModelEndpoint.agents]: expect.objectContaining({
             disableBuilder: false,
-            capabilities: expect.arrayContaining([...defaultAgentCapabilities]),
+            capabilities: expect.arrayContaining([...defaultAgentCapabilitiesWithoutMemory]),
           }),
         }),
       }),
@@ -300,7 +362,7 @@ describe('AppService', () => {
         endpoints: expect.objectContaining({
           [EModelEndpoint.agents]: expect.objectContaining({
             disableBuilder: false,
-            capabilities: expect.arrayContaining([...defaultAgentCapabilities]),
+            capabilities: expect.arrayContaining([...defaultAgentCapabilitiesWithoutMemory]),
           }),
           [EModelEndpoint.openAI]: expect.objectContaining({
             titleConvo: true,
@@ -563,9 +625,9 @@ describe('AppService', () => {
     );
 
     // Verify that optional fields are not set when not provided
-    expect(result.endpoints[EModelEndpoint.openAI].titlePrompt).toBeUndefined();
-    expect(result.endpoints[EModelEndpoint.openAI].titlePromptTemplate).toBeUndefined();
-    expect(result.endpoints[EModelEndpoint.openAI].titleMethod).toBeUndefined();
+    expect(result.endpoints![EModelEndpoint.openAI]!.titlePrompt).toBeUndefined();
+    expect(result.endpoints![EModelEndpoint.openAI]!.titlePromptTemplate).toBeUndefined();
+    expect(result.endpoints![EModelEndpoint.openAI]!.titleMethod).toBeUndefined();
   });
 
   it('should correctly configure titleEndpoint when specified', async () => {
@@ -605,6 +667,78 @@ describe('AppService', () => {
           [EModelEndpoint.agents]: expect.objectContaining({
             titleEndpoint: 'custom-provider',
             titleMethod: 'structured',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('should correctly configure Bedrock endpoint with models and inferenceProfiles', async () => {
+    const config: Partial<TCustomConfig> = {
+      endpoints: {
+        [EModelEndpoint.bedrock]: {
+          models: [
+            'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+            'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+            'global.anthropic.claude-opus-4-5-20251101-v1:0',
+          ],
+          inferenceProfiles: {
+            'us.anthropic.claude-3-7-sonnet-20250219-v1:0':
+              'arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123',
+            'us.anthropic.claude-sonnet-4-5-20250929-v1:0': '${BEDROCK_SONNET_45_PROFILE}',
+          },
+          availableRegions: ['us-east-1', 'us-west-2'],
+          titleConvo: true,
+          titleModel: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+        },
+      },
+    };
+
+    const result = await AppService({ config });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        endpoints: expect.objectContaining({
+          [EModelEndpoint.bedrock]: expect.objectContaining({
+            models: expect.arrayContaining([
+              'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+              'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+              'global.anthropic.claude-opus-4-5-20251101-v1:0',
+            ]),
+            inferenceProfiles: expect.objectContaining({
+              'us.anthropic.claude-3-7-sonnet-20250219-v1:0':
+                'arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/abc123',
+              'us.anthropic.claude-sonnet-4-5-20250929-v1:0': '${BEDROCK_SONNET_45_PROFILE}',
+            }),
+            availableRegions: expect.arrayContaining(['us-east-1', 'us-west-2']),
+            titleConvo: true,
+            titleModel: 'us.anthropic.claude-3-7-sonnet-20250219-v1:0',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('should configure Bedrock endpoint with only inferenceProfiles (no models array)', async () => {
+    const config: Partial<TCustomConfig> = {
+      endpoints: {
+        [EModelEndpoint.bedrock]: {
+          inferenceProfiles: {
+            'us.anthropic.claude-3-7-sonnet-20250219-v1:0': '${BEDROCK_INFERENCE_PROFILE_ARN}',
+          },
+        },
+      },
+    };
+
+    const result = await AppService({ config });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        endpoints: expect.objectContaining({
+          [EModelEndpoint.bedrock]: expect.objectContaining({
+            inferenceProfiles: expect.objectContaining({
+              'us.anthropic.claude-3-7-sonnet-20250219-v1:0': '${BEDROCK_INFERENCE_PROFILE_ARN}',
+            }),
           }),
         }),
       }),
@@ -752,7 +886,7 @@ describe('AppService updating app config and issuing warnings', () => {
     );
 
     // Verify excludedIds is undefined when not provided
-    expect(result.endpoints.assistants.excludedIds).toBeUndefined();
+    expect(result.endpoints!.assistants!.excludedIds).toBeUndefined();
   });
 
   it('should not parse environment variable references in OCR config', async () => {

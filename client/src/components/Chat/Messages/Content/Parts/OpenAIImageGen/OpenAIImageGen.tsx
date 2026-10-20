@@ -1,9 +1,38 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { AGENT_STYLE_TOOLS } from '.';
 import { PixelCard } from '@librechat/client';
-import type { TAttachment, TFile, TAttachmentMetadata } from 'librechat-data-provider';
+import type {
+  TAttachment,
+  TFile,
+  TAttachmentMetadata,
+  PartMetadata,
+} from 'librechat-data-provider';
+import { ToolIcon, isError } from '~/components/Chat/Messages/Content/ToolOutput';
 import Image from '~/components/Chat/Messages/Content/Image';
+import { useToolPreparation } from '../../preparation';
+import { useProgress, useLocalize } from '~/hooks';
+import { useToolCallIntent } from '../intent';
+import { ROW_GLYPH_SLOT } from '../../rows';
 import ProgressText from './ProgressText';
 import { scaleImage } from '~/utils';
+
+function computeCancelled(
+  isSubmitting: boolean,
+  initialProgress: number,
+  hasError: boolean,
+  runStepStatus?: PartMetadata['runStepStatus'],
+): boolean {
+  /**
+   * The step's own terminal status wins when the run emitted one. Checked
+   * first and not gated on `hasError`, so output parsing cannot demote a step
+   * the run reported as stopped. Everything below is the pre-existing
+   * inference, kept for messages saved before `on_run_step_closed`.
+   */
+  if (runStepStatus != null) {
+    return runStepStatus === 'cancelled';
+  }
+  return (!isSubmitting && initialProgress < 1) || hasError;
+}
 
 export default function OpenAIImageGen({
   initialProgress = 0.1,
@@ -12,32 +41,57 @@ export default function OpenAIImageGen({
   args: _args = '',
   output,
   attachments,
+  hideAttachments = false,
+  runStepStatus,
 }: {
   initialProgress: number;
   isSubmitting: boolean;
-  toolName: string;
+  toolName?: string;
   args: string | Record<string, unknown>;
   output?: string | null;
   attachments?: TAttachment[];
+  hideAttachments?: boolean;
+  runStepStatus?: PartMetadata['runStepStatus'];
 }) {
-  const [progress, setProgress] = useState(initialProgress);
+  const localize = useLocalize();
+  const preparationText = useToolPreparation();
+  /** Model-authored live label (injected when the tool is opted into
+   *  describe_intent); wins over the phase texts. */
+  const intent = useToolCallIntent(_args);
+  const isAgentStyle = toolName != null && AGENT_STYLE_TOOLS.has(toolName);
+  const [agentProgress, setAgentProgress] = useState(initialProgress);
+  const isClosed = runStepStatus != null;
+  /** Passing 1 in stops `useProgress` scheduling its interval; masking the
+   *  result makes the terminal value observable on the same render, since the
+   *  hook settles through 0.99 and a 200ms timeout. */
+  const legacyProgress = useProgress(isAgentStyle || isClosed ? 1 : initialProgress);
+  const livingProgress = isAgentStyle ? agentProgress : legacyProgress;
+  const progress = isClosed ? 1 : livingProgress;
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const error =
-    typeof output === 'string' && output.toLowerCase().includes('error processing tool');
+  const hasError = (typeof output === 'string' && isError(output)) || runStepStatus === 'failed';
 
-  const cancelled = (!isSubmitting && initialProgress < 1) || error === true;
+  /**
+   * Determines if the image generation was cancelled.
+   * Cancelled if not submitting + incomplete, or on error.
+   */
+  const cancelled = computeCancelled(isSubmitting, initialProgress, hasError, runStepStatus);
+  /**
+   * An explicit `cancelled` close is authoritative and outranks an
+   * error-formatted output — aborting a tool can itself produce one. The
+   * legacy inference keeps the opposite precedence, because it folds
+   * `hasError` into its own cancellation signal.
+   */
+  const reportsError = hasError && runStepStatus !== 'cancelled';
 
   let width: number | undefined;
   let height: number | undefined;
   let quality: 'low' | 'medium' | 'high' = 'high';
 
-  // Parse args if it's a string
-  let parsedArgs;
+  let parsedArgs: Record<string, unknown> = {};
   try {
     parsedArgs = typeof _args === 'string' ? JSON.parse(_args) : _args;
-  } catch (error) {
-    console.error('Error parsing args:', error);
+  } catch {
     parsedArgs = {};
   }
 
@@ -61,12 +115,11 @@ export default function OpenAIImageGen({
         quality = q;
       }
     }
-  } catch (e) {
+  } catch {
     width = undefined;
     height = undefined;
   }
 
-  // Default to 1024x1024 if width and height are still undefined after parsing args and attachment metadata
   const attachment = attachments?.[0];
   const {
     width: imageWidth,
@@ -98,8 +151,12 @@ export default function OpenAIImageGen({
   }, [origWidth, origHeight]);
 
   useEffect(() => {
-    if (isSubmitting) {
-      setProgress(initialProgress);
+    if (!isAgentStyle) {
+      return;
+    }
+
+    if (isSubmitting && !isClosed) {
+      setAgentProgress(initialProgress);
 
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -111,7 +168,6 @@ export default function OpenAIImageGen({
       } else if (quality === 'high') {
         baseDuration = 50000;
       }
-      // adding some jitter (±30% of base)
       const jitter = Math.floor(baseDuration * 0.3);
       const totalDuration = Math.floor(Math.random() * jitter) + baseDuration;
       const updateInterval = 200;
@@ -123,7 +179,7 @@ export default function OpenAIImageGen({
 
         if (currentStep >= totalSteps) {
           clearInterval(intervalRef.current as NodeJS.Timeout);
-          setProgress(0.9);
+          setAgentProgress(0.9);
         } else {
           const progressRatio = currentStep / totalSteps;
           let mapRatio: number;
@@ -135,7 +191,7 @@ export default function OpenAIImageGen({
           }
           const scaledProgress = 0.1 + mapRatio * 0.8;
 
-          setProgress(scaledProgress);
+          setAgentProgress(scaledProgress);
         }
       }, updateInterval);
     }
@@ -145,16 +201,20 @@ export default function OpenAIImageGen({
         clearInterval(intervalRef.current);
       }
     };
-  }, [isSubmitting, initialProgress, quality]);
+  }, [isSubmitting, initialProgress, quality, isAgentStyle, isClosed]);
 
   useEffect(() => {
-    if (initialProgress >= 1 || cancelled) {
-      setProgress(initialProgress);
+    if (!isAgentStyle) {
+      return;
+    }
+
+    if (initialProgress >= 1 || cancelled || isClosed) {
+      setAgentProgress(initialProgress);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     }
-  }, [initialProgress, cancelled]);
+  }, [initialProgress, cancelled, isAgentStyle, isClosed]);
 
   useEffect(() => {
     updateDimensions();
@@ -172,32 +232,60 @@ export default function OpenAIImageGen({
     };
   }, [updateDimensions]);
 
+  const isInProgress = progress < 1 && !cancelled;
+
   return (
     <>
-      <div className="relative my-2.5 flex size-5 shrink-0 items-center gap-2.5">
-        <ProgressText progress={progress} error={cancelled} toolName={toolName} />
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {(() => {
+          if (progress < 1 && !cancelled && !reportsError) {
+            return preparationText ?? '';
+          }
+          if (reportsError) {
+            return localize('com_ui_image_gen_failed');
+          }
+          if (cancelled) {
+            return localize('com_ui_cancelled');
+          }
+          return intent ?? localize('com_ui_image_created');
+        })()}
+      </span>
+      <div className="text-text-secondary relative my-1 flex h-5 shrink-0 items-center gap-2">
+        <span className={ROW_GLYPH_SLOT} aria-hidden="true">
+          <ToolIcon type="image_gen" isAnimating={isInProgress} />
+        </span>
+        <ProgressText
+          progress={progress}
+          error={reportsError}
+          cancelled={cancelled}
+          toolName={toolName}
+          intent={intent}
+        />
       </div>
-      <div className="relative mb-2 flex w-full justify-start">
-        <div ref={containerRef} className="w-full max-w-lg">
-          {dimensions.width !== 'auto' && progress < 1 && (
-            <PixelCard
-              variant="default"
-              progress={progress}
-              randomness={0.6}
-              width={dimensions.width}
-              height={dimensions.height}
-            />
-          )}
-          <Image
-            altText={filename}
-            imagePath={filepath ?? ''}
-            width={Number(dimensions.width?.split('px')[0])}
-            height={Number(dimensions.height?.split('px')[0])}
-            placeholderDimensions={{ width: dimensions.width, height: dimensions.height }}
-            args={parsedArgs}
-          />
+      {isAgentStyle && !hideAttachments && (
+        <div className="relative mb-2 flex w-full justify-start">
+          <div ref={containerRef} className="w-full max-w-lg">
+            {dimensions.width !== 'auto' && progress < 1 && (
+              <PixelCard
+                variant="default"
+                progress={progress}
+                randomness={0.6}
+                width={dimensions.width}
+                height={dimensions.height}
+              />
+            )}
+            {filepath && (
+              <Image
+                altText={filename}
+                imagePath={filepath}
+                width={Number(dimensions.width?.split('px')[0])}
+                height={Number(dimensions.height?.split('px')[0])}
+                args={parsedArgs}
+              />
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }
