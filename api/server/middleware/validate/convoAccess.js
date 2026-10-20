@@ -1,10 +1,20 @@
 const { isEnabled } = require('@librechat/api');
+const { logger } = require('@librechat/data-schemas');
 const { Constants, ViolationTypes, Time } = require('librechat-data-provider');
-const { searchConversation } = require('~/models/Conversation');
 const denyRequest = require('~/server/middleware/denyRequest');
 const { logViolation, getLogStores } = require('~/cache');
+const { searchConversation } = require('~/models');
 
 const { USE_REDIS, CONVO_ACCESS_VIOLATION_SCORE: score = 0 } = process.env ?? {};
+
+/**
+ * Helper function to get conversationId from different request body structures.
+ * @param {Object} body - The request body.
+ * @returns {string|undefined} The conversationId.
+ */
+const getConversationId = (body) => {
+  return body.conversationId ?? body.arg?.conversationId;
+};
 
 /**
  * Middleware to validate user's authorization for a conversation.
@@ -24,9 +34,10 @@ const validateConvoAccess = async (req, res, next) => {
   const namespace = ViolationTypes.CONVO_ACCESS;
   const cache = getLogStores(namespace);
 
-  const conversationId = req.body.conversationId;
+  const conversationId = getConversationId(req.body);
 
   if (!conversationId || conversationId === Constants.NEW_CONVO) {
+    req.resolvedConversation = null;
     return next();
   }
 
@@ -37,14 +48,23 @@ const validateConvoAccess = async (req, res, next) => {
   try {
     if (cache) {
       const cachedAccess = await cache.get(key);
-      if (cachedAccess === 'authorized') {
+      // An access marker contains no retention policy. Resolve it once at admission
+      // when independent deadlines are active, then reuse the document downstream.
+      const needsRetention =
+        req.config?.interfaceConfig?.retentionMode === 'all' &&
+        req.config.interfaceConfig.generalChatRetention !== undefined;
+      if (cachedAccess === 'authorized' && !needsRetention) {
         return next();
       }
     }
 
-    const conversation = await searchConversation(conversationId);
+    /** One read serves the subagent guard, agent initialization, and the first save via
+     *  `req.resolvedConversation`. `messages` is the only unbounded field and no consumer
+     *  reads it, so it stays excluded — ownership is not yet known at this point. */
+    const conversation = await searchConversation(conversationId, '-messages');
 
     if (!conversation) {
+      req.resolvedConversation = null;
       return next();
     }
 
@@ -61,8 +81,13 @@ const validateConvoAccess = async (req, res, next) => {
     }
 
     if (cache) {
-      await cache.set(key, 'authorized', Time.TEN_MINUTES);
+      /** The marker only short-circuits the next check; the violations store is file-backed
+       *  without Redis and its debounced write takes ~100ms, so it must not gate this request. */
+      cache.set(key, 'authorized', Time.TEN_MINUTES).catch((error) => {
+        logger.warn('[validateConvoAccess] Failed to cache conversation access', error);
+      });
     }
+    req.resolvedConversation = conversation;
     next();
   } catch (error) {
     console.error('Error validating conversation access:', error);

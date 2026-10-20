@@ -1,163 +1,60 @@
-import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
-import throttle from 'lodash/throttle';
-import { useRecoilValue } from 'recoil';
-import { getConfigDefaults } from 'librechat-data-provider';
-import { ResizablePanel, ResizablePanelGroup, useMediaQuery } from '@librechat/client';
-import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { useGetStartupConfig } from '~/data-provider';
+import { useState, memo } from 'react';
+import { useDefaultLayout } from 'react-resizable-panels';
+import { ResizablePanel, ResizablePanelGroup } from '@librechat/client';
+import { ARTIFACTS_SHEET_MAX_WIDTH } from '~/utils/breakpoints';
+import useScaledMaxWidth from '~/hooks/useScaledMaxWidth';
 import ArtifactsPanel from './ArtifactsPanel';
-import { normalizeLayout } from '~/utils';
-import SidePanel from './SidePanel';
-import store from '~/store';
+
+const PANEL_IDS_SINGLE = ['messages-view'];
+/** Keep the persisted id stable so existing artifact panel widths carry over. */
+const PANEL_IDS_SPLIT = ['messages-view', 'artifacts-panel'];
 
 interface SidePanelProps {
-  defaultLayout?: number[] | undefined;
-  defaultCollapsed?: boolean;
-  navCollapsedSize?: number;
-  fullPanelCollapse?: boolean;
-  artifacts?: React.ReactNode;
+  panel?: React.ReactNode;
   children: React.ReactNode;
 }
 
-const defaultMinSize = 20;
-const defaultInterface = getConfigDefaults().interface;
+const SidePanelGroup = memo(({ panel, children }: SidePanelProps) => {
+  const [shouldRenderPanel, setShouldRenderPanel] = useState(panel != null);
+  const isSmallScreen = useScaledMaxWidth(ARTIFACTS_SHEET_MAX_WIDTH);
 
-const SidePanelGroup = memo(
-  ({
-    defaultLayout = [97, 3],
-    defaultCollapsed = false,
-    fullPanelCollapse = false,
-    navCollapsedSize = 3,
-    artifacts,
-    children,
-  }: SidePanelProps) => {
-    const { data: startupConfig } = useGetStartupConfig();
-    const interfaceConfig = useMemo(
-      () => startupConfig?.interface ?? defaultInterface,
-      [startupConfig],
-    );
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: 'side-panel-layout',
+    panelIds: panel != null ? PANEL_IDS_SPLIT : PANEL_IDS_SINGLE,
+    storage: localStorage,
+  });
 
-    const panelRef = useRef<ImperativePanelHandle>(null);
-    const [minSize, setMinSize] = useState(defaultMinSize);
-    const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
-    const [fullCollapse, setFullCollapse] = useState(fullPanelCollapse);
-    const [collapsedSize, setCollapsedSize] = useState(navCollapsedSize);
-    const [shouldRenderArtifacts, setShouldRenderArtifacts] = useState(artifacts != null);
+  const minSizeMain = panel != null ? '15' : '30';
 
-    const isSmallScreen = useMediaQuery('(max-width: 767px)');
-    const hideSidePanel = useRecoilValue(store.hideSidePanel);
-
-    const calculateLayout = useCallback(() => {
-      if (artifacts == null) {
-        const navSize = defaultLayout.length === 2 ? defaultLayout[1] : defaultLayout[2];
-        return [100 - navSize, navSize];
-      } else {
-        const navSize = 0;
-        const remainingSpace = 100 - navSize;
-        const newMainSize = Math.floor(remainingSpace / 2);
-        const artifactsSize = remainingSpace - newMainSize;
-        return [newMainSize, artifactsSize, navSize];
-      }
-    }, [artifacts, defaultLayout]);
-
-    const currentLayout = useMemo(() => normalizeLayout(calculateLayout()), [calculateLayout]);
-
-    const throttledSaveLayout = useMemo(
-      () =>
-        throttle((sizes: number[]) => {
-          const normalizedSizes = normalizeLayout(sizes);
-          localStorage.setItem('react-resizable-panels:layout', JSON.stringify(normalizedSizes));
-        }, 350),
-      [],
-    );
-
-    useEffect(() => {
-      if (isSmallScreen) {
-        setIsCollapsed(true);
-        setCollapsedSize(0);
-        setMinSize(defaultMinSize);
-        setFullCollapse(true);
-        localStorage.setItem('fullPanelCollapse', 'true');
-        panelRef.current?.collapse();
-        return;
-      } else {
-        setIsCollapsed(defaultCollapsed);
-        setCollapsedSize(navCollapsedSize);
-        setMinSize(defaultMinSize);
-      }
-    }, [isSmallScreen, defaultCollapsed, navCollapsedSize, fullPanelCollapse]);
-
-    const minSizeMain = useMemo(() => (artifacts != null ? 15 : 30), [artifacts]);
-
-    /** Memoized close button handler to prevent re-creating it */
-    const handleClosePanel = useCallback(() => {
-      setIsCollapsed(() => {
-        localStorage.setItem('fullPanelCollapse', 'true');
-        setFullCollapse(true);
-        setCollapsedSize(0);
-        setMinSize(0);
-        return false;
-      });
-      panelRef.current?.collapse();
-    }, []);
-
-    return (
-      <>
+  return (
+    <>
+      {/* The surface behind the panels is this group's host, not the group
+          primitive: the resizer owns its own chrome, and the caller owns the
+          backdrop the panels sit on. */}
+      <div className="relative min-w-0 flex-1">
         <ResizablePanelGroup
-          direction="horizontal"
-          onLayout={(sizes) => throttledSaveLayout(sizes)}
-          className="relative h-full w-full flex-1 overflow-auto bg-presentation"
+          orientation="horizontal"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={onLayoutChanged}
         >
-          <ResizablePanel
-            defaultSize={currentLayout[0]}
-            minSize={minSizeMain}
-            order={1}
-            id="messages-view"
-          >
+          <ResizablePanel defaultSize="50" minSize={minSizeMain} id="messages-view">
             {children}
           </ResizablePanel>
 
           {!isSmallScreen && (
             <ArtifactsPanel
-              artifacts={artifacts}
-              currentLayout={currentLayout}
+              panel={panel}
               minSizeMain={minSizeMain}
-              shouldRender={shouldRenderArtifacts}
-              onRenderChange={setShouldRenderArtifacts}
-            />
-          )}
-
-          {!hideSidePanel && interfaceConfig.sidePanel === true && (
-            <SidePanel
-              panelRef={panelRef}
-              minSize={minSize}
-              setMinSize={setMinSize}
-              isCollapsed={isCollapsed}
-              setIsCollapsed={setIsCollapsed}
-              collapsedSize={collapsedSize}
-              setCollapsedSize={setCollapsedSize}
-              fullCollapse={fullCollapse}
-              setFullCollapse={setFullCollapse}
-              interfaceConfig={interfaceConfig}
-              hasArtifacts={shouldRenderArtifacts}
-              defaultSize={currentLayout[currentLayout.length - 1]}
+              shouldRender={shouldRenderPanel}
+              onRenderChange={setShouldRenderPanel}
             />
           )}
         </ResizablePanelGroup>
-        {artifacts != null && isSmallScreen && (
-          <div className="fixed inset-0 z-[100]">{artifacts}</div>
-        )}
-        {!hideSidePanel && interfaceConfig.sidePanel === true && (
-          <button
-            aria-label="Close right side panel"
-            className={`nav-mask ${!isCollapsed ? 'active' : ''}`}
-            onClick={handleClosePanel}
-          />
-        )}
-      </>
-    );
-  },
-);
+      </div>
+      {panel != null && isSmallScreen && <div className="fixed inset-0 z-[100]">{panel}</div>}
+    </>
+  );
+});
 
 SidePanelGroup.displayName = 'SidePanelGroup';
 

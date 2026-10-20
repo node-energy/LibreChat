@@ -1,39 +1,51 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
 import filenamify from 'filenamify';
 import exportFromJSON from 'export-from-json';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useToastContext } from '@librechat/client';
 import { QueryKeys } from 'librechat-data-provider';
-import { useCallback, useEffect, useRef } from 'react';
+import { presetFamily } from '@librechat/chat/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRecoilState, useSetRecoilState, useRecoilValue } from 'recoil';
 import { useCreatePresetMutation, useGetModelsQuery } from 'librechat-data-provider/react-query';
 import type { TPreset, TEndpointsConfig } from 'librechat-data-provider';
 import {
+  normalizeExportFilename,
+  removeUnavailableTools,
+  getConvoSwitchLogic,
+  cleanupPreset,
+} from '~/utils';
+import {
   useUpdatePresetMutation,
   useDeletePresetMutation,
   useGetPresetsQuery,
 } from '~/data-provider';
-import { cleanupPreset, removeUnavailableTools, getConvoSwitchLogic } from '~/utils';
+import useGetConversation from '~/hooks/Conversations/useGetConversation';
 import useDefaultConvo from '~/hooks/Conversations/useDefaultConvo';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { NotificationSeverity } from '~/common';
 import useNewConvo from '~/hooks/useNewConvo';
-import { useChatContext } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
 
-export default function usePresets() {
+export default function usePresets(index = 0) {
   const localize = useLocalize();
   const hasLoaded = useRef(false);
   const queryClient = useQueryClient();
   const { showToast } = useToastContext();
+  const getConversation = useGetConversation(index);
   const { user, isAuthenticated } = useAuthContext();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [presetToDelete, setPresetToDelete] = useState<TPreset | null>(null);
 
   const modularChat = useRecoilValue(store.modularChat);
   const availableTools = useRecoilValue(store.availableTools);
   const setPresetModalVisible = useSetRecoilState(store.presetModalVisible);
   const [_defaultPreset, setDefaultPreset] = useRecoilState(store.defaultPreset);
   const presetsQuery = useGetPresetsQuery({ enabled: !!user && isAuthenticated });
-  const { preset, conversation, index, setPreset } = useChatContext();
+  const preset = useAtomValue(presetFamily(index));
+  const setPreset = useSetAtom(presetFamily(index));
+  const conversationId = useRecoilValue(store.conversationIdByIndex(index));
   const { data: modelsData } = useGetModelsQuery();
   const { newConversation } = useNewConvo(index);
 
@@ -58,13 +70,13 @@ export default function usePresets() {
       return;
     }
     setDefaultPreset(defaultPreset);
-    if (!conversation?.conversationId || conversation.conversationId === 'new') {
+    if (!conversationId || conversationId === 'new') {
       newConversation({ preset: defaultPreset, modelsData, disableParams: true });
     }
     hasLoaded.current = true;
     // dependencies are stable and only needed once
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetsQuery.data, user, modelsData]);
+  }, [presetsQuery.data, user, modelsData, conversationId]);
 
   const setPresets = useCallback(
     (presets: TPreset[]) => {
@@ -86,6 +98,11 @@ export default function usePresets() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries([QueryKeys.presets]);
+      showToast({
+        message: localize('com_endpoint_preset_delete_success'),
+        severity: NotificationSeverity.SUCCESS,
+        showIcon: true,
+      });
     },
     onError: (error) => {
       queryClient.invalidateQueries([QueryKeys.presets]);
@@ -93,6 +110,7 @@ export default function usePresets() {
       showToast({
         message: localize('com_endpoint_preset_delete_error'),
         severity: NotificationSeverity.ERROR,
+        showIcon: true,
       });
     },
   });
@@ -156,6 +174,7 @@ export default function usePresets() {
       return;
     }
 
+    const conversation = getConversation();
     const newPreset = removeUnavailableTools(_newPreset, availableTools);
 
     const toastTitle = newPreset.title
@@ -206,7 +225,6 @@ export default function usePresets() {
       newConversation({
         template: currentConvo,
         preset: currentConvo,
-        keepLatestMessage: true,
         keepAddedConvos: true,
         disableParams,
       });
@@ -224,10 +242,17 @@ export default function usePresets() {
   const clearAllPresets = () => deletePresetsMutation.mutate(undefined);
 
   const onDeletePreset = (preset: TPreset) => {
-    if (!confirm(localize('com_endpoint_preset_delete_confirm'))) {
+    setPresetToDelete(preset);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDeletePreset = () => {
+    if (!presetToDelete) {
       return;
     }
-    deletePresetsMutation.mutate(preset);
+    deletePresetsMutation.mutate(presetToDelete);
+    setShowDeleteDialog(false);
+    setPresetToDelete(null);
   };
 
   const submitPreset = () => {
@@ -246,7 +271,7 @@ export default function usePresets() {
     if (!preset) {
       return;
     }
-    const fileName = filenamify(preset.title || 'preset');
+    const fileName = normalizeExportFilename(filenamify(preset.title || 'preset'));
     exportFromJSON({
       data: cleanupPreset({ preset }),
       fileName,
@@ -264,5 +289,9 @@ export default function usePresets() {
     onDeletePreset,
     submitPreset,
     exportPreset,
+    showDeleteDialog,
+    setShowDeleteDialog,
+    presetToDelete,
+    confirmDeletePreset,
   };
 }

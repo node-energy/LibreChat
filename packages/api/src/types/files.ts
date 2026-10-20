@@ -1,13 +1,16 @@
+import type { BedrockDocumentFormat } from 'librechat-data-provider';
 import type { IMongoFile } from '@librechat/data-schemas';
-import type { ServerRequest } from './http';
 import type { Readable } from 'stream';
+import type { DownloadURLParams } from '~/storage/types';
+import type { ServerRequest } from './http';
 export interface STTService {
   getInstance(): Promise<STTService>;
-  getProviderSchema(req: ServerRequest): Promise<[string, object]>;
+  getProviderSchema(req: ServerRequest): Promise<[string, object, string[] | undefined]>;
   sttRequest(
     provider: string,
     schema: object,
     params: { audioBuffer: Buffer; audioFile: AudioFileInfo },
+    allowedAddresses?: string[],
   ): Promise<string>;
 }
 
@@ -29,12 +32,25 @@ export interface AudioProcessingResult {
   bytes: number;
 }
 
+/** Google video block format */
+export interface GoogleVideoBlock {
+  type: 'media';
+  mimeType: string;
+  data: string;
+}
+
+/** OpenAI-compatible video block format (OpenRouter, vLLM, configured custom endpoints) */
+export interface OpenRouterVideoBlock {
+  type: 'video_url';
+  video_url: {
+    url: string;
+  };
+}
+
+export type VideoBlock = GoogleVideoBlock | OpenRouterVideoBlock;
+
 export interface VideoResult {
-  videos: Array<{
-    type: string;
-    mimeType: string;
-    data: string;
-  }>;
+  videos: VideoBlock[];
   files: Array<{
     file_id?: string;
     temp_file_id?: string;
@@ -75,6 +91,12 @@ export interface OpenAIFileBlock {
   };
 }
 
+/** OpenAI-compatible text part carrying a textual document's decoded contents */
+export interface OpenAITextDocumentBlock {
+  type: 'text';
+  text: string;
+}
+
 /** OpenAI Responses API file format */
 export interface OpenAIInputFileBlock {
   type: 'input_file';
@@ -82,11 +104,25 @@ export interface OpenAIInputFileBlock {
   file_data: string;
 }
 
+/** Bedrock Converse API document block (passthrough via @langchain/aws) */
+export interface BedrockDocumentBlock {
+  type: 'document';
+  document: {
+    name: string;
+    format: BedrockDocumentFormat;
+    source: {
+      bytes: Buffer;
+    };
+  };
+}
+
 export type DocumentBlock =
   | AnthropicDocumentBlock
   | GoogleDocumentBlock
   | OpenAIFileBlock
-  | OpenAIInputFileBlock;
+  | OpenAITextDocumentBlock
+  | OpenAIInputFileBlock
+  | BedrockDocumentBlock;
 
 export interface DocumentResult {
   documents: DocumentBlock[];
@@ -100,12 +136,26 @@ export interface DocumentResult {
   }>;
 }
 
-export interface AudioResult {
-  audios: Array<{
-    type: string;
-    mimeType: string;
+/** Google audio block format */
+export interface GoogleAudioBlock {
+  type: 'media';
+  mimeType: string;
+  data: string;
+}
+
+/** OpenAI-compatible audio block format (OpenRouter, vLLM, configured custom endpoints) */
+export interface OpenRouterAudioBlock {
+  type: 'input_audio';
+  input_audio: {
     data: string;
-  }>;
+    format: string;
+  };
+}
+
+export type AudioBlock = GoogleAudioBlock | OpenRouterAudioBlock;
+
+export interface AudioResult {
+  audios: AudioBlock[];
   files: Array<{
     file_id?: string;
     temp_file_id?: string;
@@ -116,8 +166,8 @@ export interface AudioResult {
   }>;
 }
 
-export interface ProcessedFile {
-  file: IMongoFile;
+export interface ProcessedFile<T = IMongoFile> {
+  file: T;
   content: string;
   metadata: {
     file_id: string;
@@ -129,6 +179,18 @@ export interface ProcessedFile {
   };
 }
 
+/** Subset of storage strategy functions needed by download and delete access flows. */
 export interface StrategyFunctions {
   getDownloadStream: (req: ServerRequest, filepath: string) => Promise<Readable>;
+  getDownloadURL?: (params: DownloadURLParams) => Promise<string>;
+  deleteFile?: (
+    req: ServerRequest,
+    file: {
+      filepath: string;
+      storageKey?: string | null;
+      storageRegion?: string | null;
+      user?: string;
+      tenantId?: string | null;
+    },
+  ) => Promise<void>;
 }

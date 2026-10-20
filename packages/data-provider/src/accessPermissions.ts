@@ -30,21 +30,16 @@ export enum PrincipalModel {
 }
 
 /**
- * Source of the principal (local LibreChat or external Entra ID)
- */
-export type TPrincipalSource = 'local' | 'entra';
-
-/**
- * Access levels for agents
- */
-export type TAccessLevel = 'none' | 'viewer' | 'editor' | 'owner';
-
-/**
  * Resource types for permission system
  */
 export enum ResourceType {
   AGENT = 'agent',
+  CODE_ENVIRONMENT = 'codeEnvironment',
   PROMPTGROUP = 'promptGroup',
+  MCPSERVER = 'mcpServer',
+  REMOTE_AGENT = 'remoteAgent',
+  SKILL = 'skill',
+  SHARED_LINK = 'sharedLink',
 }
 
 /**
@@ -59,6 +54,8 @@ export enum PermissionBits {
   DELETE = 4,
   /**  1000 - Can share agent with others (future) */
   SHARE = 8,
+  /** 10000 - Can view Insights data for an agent when VIEW is also present */
+  VIEW_INSIGHTS = 16,
 }
 
 /**
@@ -68,9 +65,23 @@ export enum AccessRoleIds {
   AGENT_VIEWER = 'agent_viewer',
   AGENT_EDITOR = 'agent_editor',
   AGENT_OWNER = 'agent_owner',
+  CODE_ENVIRONMENT_VIEWER = 'codeEnvironment_viewer',
+  CODE_ENVIRONMENT_EDITOR = 'codeEnvironment_editor',
+  CODE_ENVIRONMENT_OWNER = 'codeEnvironment_owner',
   PROMPTGROUP_VIEWER = 'promptGroup_viewer',
   PROMPTGROUP_EDITOR = 'promptGroup_editor',
   PROMPTGROUP_OWNER = 'promptGroup_owner',
+  MCPSERVER_VIEWER = 'mcpServer_viewer',
+  MCPSERVER_EDITOR = 'mcpServer_editor',
+  MCPSERVER_OWNER = 'mcpServer_owner',
+  REMOTE_AGENT_VIEWER = 'remoteAgent_viewer',
+  REMOTE_AGENT_EDITOR = 'remoteAgent_editor',
+  REMOTE_AGENT_OWNER = 'remoteAgent_owner',
+  SKILL_VIEWER = 'skill_viewer',
+  SKILL_EDITOR = 'skill_editor',
+  SKILL_OWNER = 'skill_owner',
+  SHARED_LINK_VIEWER = 'sharedLink_viewer',
+  SHARED_LINK_OWNER = 'sharedLink_owner',
 }
 
 // ===== ZOD SCHEMAS =====
@@ -88,6 +99,8 @@ export const principalSchema = z.object({
   description: z.string().optional(), // for group and role types
   idOnTheSource: z.string().optional(), // Entra ID for users/groups
   accessRoleId: z.nativeEnum(AccessRoleIds).optional(), // Access role ID for permissions
+  viewInsights: z.boolean().optional(),
+  isAdmin: z.boolean().optional(),
   memberCount: z.number().optional(), // for group type
 });
 
@@ -103,37 +116,13 @@ export const accessRoleSchema = z.object({
 });
 
 /**
- * Permission entry schema - represents a single ACL entry
- */
-export const permissionEntrySchema = z.object({
-  id: z.string(),
-  principalType: z.nativeEnum(PrincipalType),
-  principalId: z.string().optional(), // undefined for 'public'
-  principalName: z.string().optional(),
-  role: accessRoleSchema,
-  grantedBy: z.string(),
-  grantedAt: z.string(), // ISO date string
-  inheritedFrom: z.string().optional(), // for project-level inheritance
-  source: z.enum(['local', 'entra']).optional(),
-});
-
-/**
- * Resource permissions response schema
- */
-export const resourcePermissionsResponseSchema = z.object({
-  resourceType: z.nativeEnum(ResourceType),
-  resourceId: z.string(),
-  permissions: z.array(permissionEntrySchema),
-});
-
-/**
  * Update resource permissions request schema
  * This matches the user's requirement for the frontend DTO structure
  */
 export const updateResourcePermissionsRequestSchema = z.object({
   updated: principalSchema.array(),
   removed: principalSchema.array(),
-  public: z.boolean(),
+  public: z.boolean().optional(),
   publicAccessRoleId: z.string().optional(),
 });
 
@@ -145,7 +134,7 @@ export const updateResourcePermissionsResponseSchema = z.object({
   message: z.string(),
   results: z.object({
     principals: principalSchema.array(),
-    public: z.boolean(),
+    public: z.boolean().optional(),
     publicAccessRoleId: z.string().optional(),
   }),
 });
@@ -161,16 +150,6 @@ export type TPrincipal = z.infer<typeof principalSchema>;
  * Access role - defines named permission sets
  */
 export type TAccessRole = z.infer<typeof accessRoleSchema>;
-
-/**
- * Permission entry - represents a single ACL entry
- */
-export type TPermissionEntry = z.infer<typeof permissionEntrySchema>;
-
-/**
- * Resource permissions response
- */
-export type TResourcePermissionsResponse = z.infer<typeof resourcePermissionsResponseSchema>;
 
 /**
  * Update resource permissions request
@@ -189,15 +168,6 @@ export type TUpdateResourcePermissionsResponse = z.infer<
 >;
 
 /**
- * Principal search request parameters
- */
-export type TPrincipalSearchParams = {
-  q: string; // search query (required)
-  limit?: number; // max results (1-50, default 10)
-  type?: PrincipalType.USER | PrincipalType.GROUP | PrincipalType.ROLE; // filter by type (optional)
-};
-
-/**
  * Principal search result item
  */
 export type TPrincipalSearchResult = {
@@ -212,6 +182,7 @@ export type TPrincipalSearchResult = {
   memberCount?: number; // for groups
   description?: string; // for groups
   idOnTheSource?: string; // Entra ID for users (maps to openidId) and groups (maps to idOnTheSource)
+  isAdmin?: boolean;
 };
 
 /**
@@ -220,21 +191,13 @@ export type TPrincipalSearchResult = {
 export type TPrincipalSearchResponse = {
   query: string;
   limit: number;
-  type?: PrincipalType.USER | PrincipalType.GROUP | PrincipalType.ROLE;
+  types?: Array<PrincipalType.USER | PrincipalType.GROUP | PrincipalType.ROLE> | null;
   results: TPrincipalSearchResult[];
   count: number;
   sources: {
     local: number;
     entra: number;
   };
-};
-
-/**
- * Available roles response
- */
-export type TAvailableRolesResponse = {
-  resourceType: ResourceType;
-  roles: TAccessRole[];
 };
 
 /**
@@ -269,46 +232,13 @@ export const effectivePermissionsResponseSchema = z.object({
  */
 export type TEffectivePermissionsResponse = z.infer<typeof effectivePermissionsResponseSchema>;
 
-// ===== UTILITY TYPES =====
-
 /**
- * Permission check result
+ * All effective permissions response type
+ * Map of resourceId to permissionBits for all accessible resources
  */
-export interface TPermissionCheck {
-  canView: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-  canShare: boolean;
-  accessLevel: TAccessLevel;
-}
+export type TAllEffectivePermissionsResponse = Record<string, number>;
 
 // ===== HELPER FUNCTIONS =====
-
-/**
- * Convert permission bits to access level
- */
-export function permBitsToAccessLevel(permBits: number): TAccessLevel {
-  if ((permBits & PermissionBits.DELETE) > 0) return 'owner';
-  if ((permBits & PermissionBits.EDIT) > 0) return 'editor';
-  if ((permBits & PermissionBits.VIEW) > 0) return 'viewer';
-  return 'none';
-}
-
-/**
- * Convert access role ID to permission bits
- */
-export function accessRoleToPermBits(accessRoleId: string): number {
-  switch (accessRoleId) {
-    case AccessRoleIds.AGENT_VIEWER:
-      return PermissionBits.VIEW;
-    case AccessRoleIds.AGENT_EDITOR:
-      return PermissionBits.VIEW | PermissionBits.EDIT;
-    case AccessRoleIds.AGENT_OWNER:
-      return PermissionBits.VIEW | PermissionBits.EDIT | PermissionBits.DELETE;
-    default:
-      return PermissionBits.VIEW;
-  }
-}
 
 /**
  * Check if permission bitmask contains other bitmask

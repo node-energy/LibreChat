@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { closeRedisClients } from '~/cache/__tests__/redisClients.helper';
 
 describe('RegistryStatusCache Integration Tests', () => {
   let registryStatusCache: typeof import('../RegistryStatusCache').registryStatusCache;
@@ -36,12 +37,18 @@ describe('RegistryStatusCache Integration Tests', () => {
 
   afterEach(async () => {
     // Clean up: clear all test keys from Redis
-    if (keyvRedisClient) {
+    if (keyvRedisClient && 'scanIterator' in keyvRedisClient) {
       const pattern = '*RegistryStatusCache-IntegrationTest*';
-      if ('scanIterator' in keyvRedisClient) {
-        for await (const key of keyvRedisClient.scanIterator({ MATCH: pattern })) {
-          await keyvRedisClient.del(key);
-        }
+      const keysToDelete: string[] = [];
+
+      // Collect all keys first
+      for await (const page of keyvRedisClient.scanIterator({ MATCH: pattern })) {
+        keysToDelete.push(...page);
+      }
+
+      // Delete in parallel for cluster mode efficiency
+      if (keysToDelete.length > 0) {
+        await Promise.all(keysToDelete.map((key) => keyvRedisClient!.del(key)));
       }
     }
   });
@@ -50,8 +57,8 @@ describe('RegistryStatusCache Integration Tests', () => {
     // Resign as leader
     if (leaderInstance) await leaderInstance.resign();
 
-    // Close Redis connection
-    if (keyvRedisClient?.isOpen) await keyvRedisClient.disconnect();
+    // Close both Redis clients created by the module import
+    await closeRedisClients();
   });
 
   describe('Initialization status tracking', () => {

@@ -1,6 +1,13 @@
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils';
 
-export default function VolumeMuteIcon({ className = '', size = '1em' }) {
+export default function VolumeMuteIcon({
+  className = '',
+  size = '1em',
+}: {
+  className?: string | undefined;
+  size?: string | undefined;
+}): JSX.Element {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -9,6 +16,7 @@ export default function VolumeMuteIcon({ className = '', size = '1em' }) {
       height={size}
       width={size}
       className={cn(className)}
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

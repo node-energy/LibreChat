@@ -1,6 +1,7 @@
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils';
 
-export default function ContinueIcon({ className = '' }: { className?: string }) {
+export default function ContinueIcon({ className = '' }: { className?: string }): JSX.Element {
   return (
     <svg
       stroke="currentColor"
@@ -13,6 +14,7 @@ export default function ContinueIcon({ className = '' }: { className?: string })
       height="19"
       width="19"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <polygon points="11 19 2 12 11 5 11 19" />
       <polygon points="22 19 13 12 22 5 22 19" />

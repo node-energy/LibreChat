@@ -1,6 +1,13 @@
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils';
 
-export default function RegenerateIcon({ className = '', size = '1em' }) {
+export default function RegenerateIcon({
+  className = '',
+  size = '1em',
+}: {
+  className?: string | undefined;
+  size?: string | undefined;
+}): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -11,6 +18,7 @@ export default function RegenerateIcon({ className = '', size = '1em' }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       className={cn('icon-md-heavy', className)}
+      aria-hidden="true"
     >
       <path
         fill="currentColor"

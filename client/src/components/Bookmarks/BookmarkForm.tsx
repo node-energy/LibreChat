@@ -1,20 +1,19 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { QueryKeys } from 'librechat-data-provider';
 import { Controller, useForm } from 'react-hook-form';
 import { useQueryClient } from '@tanstack/react-query';
-import { Checkbox, Label, TextareaAutosize, Input, useToastContext } from '@librechat/client';
+import { Checkbox, FieldMessage, Label, TextareaAutosize, Input } from '@librechat/client';
 import type { TConversationTag, TConversationTagRequest } from 'librechat-data-provider';
 import { useBookmarkContext } from '~/Providers/BookmarkContext';
 import { useConversationTagMutation } from '~/data-provider';
 import { useLocalize } from '~/hooks';
-import { cn, logger } from '~/utils';
+import { logger } from '~/utils';
 
 type TBookmarkFormProps = {
   tags?: string[];
   bookmark?: TConversationTag;
   conversationId?: string;
   formRef: React.RefObject<HTMLFormElement>;
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
   mutation: ReturnType<typeof useConversationTagMutation>;
 };
 const BookmarkForm = ({
@@ -22,12 +21,10 @@ const BookmarkForm = ({
   bookmark,
   mutation,
   conversationId,
-  setOpen,
   formRef,
 }: TBookmarkFormProps) => {
   const localize = useLocalize();
   const queryClient = useQueryClient();
-  const { showToast } = useToastContext();
   const { bookmarks } = useBookmarkContext();
 
   const {
@@ -48,12 +45,27 @@ const BookmarkForm = ({
     },
   });
 
-  useEffect(() => {
-    if (bookmark && bookmark.tag) {
+  const [prevBookmark, setPrevBookmark] = React.useState(bookmark);
+
+  if (bookmark !== prevBookmark) {
+    setPrevBookmark(bookmark);
+    if (bookmark?.tag != null && bookmark.tag !== '') {
       setValue('tag', bookmark.tag);
       setValue('description', bookmark.description ?? '');
     }
-  }, [bookmark, setValue]);
+  }
+
+  /** Every source that could already hold the title, checked before the request is sent. */
+  const isTagTaken = (value: string) => {
+    const allTags =
+      queryClient.getQueryData<TConversationTag[]>([QueryKeys.conversationTags]) ?? [];
+
+    return (
+      (tags ?? []).includes(value) ||
+      allTags.some((tag) => tag.tag === value) ||
+      bookmarks.some((existing) => existing.tag === value)
+    );
+  };
 
   const onSubmit = (data: TConversationTagRequest) => {
     logger.log('tag_mutation', 'BookmarkForm - onSubmit: data', data);
@@ -63,46 +75,22 @@ const BookmarkForm = ({
     if (data.tag === bookmark?.tag && data.description === bookmark?.description) {
       return;
     }
-    if (data.tag != null && (tags ?? []).includes(data.tag)) {
-      showToast({
-        message: localize('com_ui_bookmarks_create_exists'),
-        status: 'warning',
-      });
-      return;
-    }
-    const allTags =
-      queryClient.getQueryData<TConversationTag[]>([QueryKeys.conversationTags]) ?? [];
-    if (allTags.some((tag) => tag.tag === data.tag && tag.tag !== bookmark?.tag)) {
-      showToast({
-        message: localize('com_ui_bookmarks_create_exists'),
-        status: 'warning',
-      });
-      return;
-    }
 
     mutation.mutate(data);
-    setOpen(false);
   };
 
   return (
-    <form
-      ref={formRef}
-      className="mt-6"
-      aria-label="Bookmark form"
-      method="POST"
-      onSubmit={handleSubmit(onSubmit)}
-    >
-      <div className="flex w-full flex-col items-center gap-2">
-        <div className="grid w-full items-center gap-2">
-          <Label htmlFor="bookmark-tag" className="text-left text-sm font-medium">
+    <form ref={formRef} aria-label="Bookmark form" method="POST" onSubmit={handleSubmit(onSubmit)}>
+      <div className="space-y-4">
+        {/* Tag name input */}
+        <div className="space-y-2">
+          <Label htmlFor="bookmark-tag" className="text-sm font-medium">
             {localize('com_ui_bookmarks_title')}
           </Label>
           <Input
             type="text"
             id="bookmark-tag"
-            aria-label={
-              bookmark ? localize('com_ui_bookmarks_edit') : localize('com_ui_bookmarks_new')
-            }
+            aria-label={localize('com_ui_bookmarks_title')}
             {...register('tag', {
               required: localize('com_ui_field_required'),
               maxLength: {
@@ -113,30 +101,31 @@ const BookmarkForm = ({
                 }),
               },
               validate: (value) => {
-                return (
-                  value === bookmark?.tag ||
-                  bookmarks.every((bookmark) => bookmark.tag !== value) ||
-                  localize('com_ui_bookmarks_tag_exists')
-                );
+                if (value == null || value === '' || value === bookmark?.tag) {
+                  return true;
+                }
+                return !isTagTaken(value) || localize('com_ui_bookmarks_tag_exists');
               },
             })}
+            className="w-full"
             aria-invalid={!!errors.tag}
-            placeholder={
-              bookmark ? localize('com_ui_bookmarks_edit') : localize('com_ui_bookmarks_new')
-            }
+            placeholder={localize('com_ui_enter_name')}
+            aria-describedby="bookmark-tag-error"
           />
-          {errors.tag && <span className="text-sm text-red-500">{errors.tag.message}</span>}
+          <FieldMessage id="bookmark-tag-error" message={errors.tag?.message} />
         </div>
 
-        <div className="mt-4 grid w-full items-center gap-2">
+        {/* Description textarea */}
+        <div className="space-y-2">
           <Label
             id="bookmark-description-label"
             htmlFor="bookmark-description"
-            className="text-left text-sm font-medium"
+            className="text-sm font-medium"
           >
             {localize('com_ui_bookmarks_description')}
           </Label>
           <TextareaAutosize
+            focusOutline="hidden"
             {...register('description', {
               maxLength: {
                 value: 1048,
@@ -148,14 +137,19 @@ const BookmarkForm = ({
             })}
             id="bookmark-description"
             disabled={false}
-            className={cn(
-              'flex h-10 max-h-[250px] min-h-[100px] w-full resize-none rounded-lg border border-input bg-transparent px-3 py-2 text-sm ring-offset-background focus-visible:outline-none',
-            )}
+            placeholder={localize('com_ui_enter_description')}
+            variant="field"
+            className="min-h-[6.25rem] resize-none"
             aria-labelledby="bookmark-description-label"
+            aria-invalid={!!errors.description}
+            aria-describedby="bookmark-description-error"
           />
+          <FieldMessage id="bookmark-description-error" message={errors.description?.message} />
         </div>
+
+        {/* Add to conversation checkbox */}
         {conversationId != null && conversationId && (
-          <div className="mt-2 flex w-full items-center">
+          <div className="flex items-center gap-2">
             <Controller
               name="addToConversation"
               control={control}
@@ -164,7 +158,7 @@ const BookmarkForm = ({
                   {...field}
                   checked={field.value}
                   onCheckedChange={field.onChange}
-                  className="relative float-left mr-2 inline-flex h-4 w-4 cursor-pointer"
+                  className="cursor-pointer"
                   value={field.value?.toString()}
                   aria-label={localize('com_ui_bookmarks_add_to_conversation')}
                 />
@@ -173,16 +167,14 @@ const BookmarkForm = ({
             <button
               type="button"
               aria-label={localize('com_ui_bookmarks_add_to_conversation')}
-              className="form-check-label w-full cursor-pointer text-text-primary"
+              className="text-text-primary cursor-pointer text-sm"
               onClick={() =>
                 setValue('addToConversation', !(getValues('addToConversation') ?? false), {
                   shouldDirty: true,
                 })
               }
             >
-              <div className="flex select-none items-center">
-                {localize('com_ui_bookmarks_add_to_conversation')}
-              </div>
+              {localize('com_ui_bookmarks_add_to_conversation')}
             </button>
           </div>
         )}

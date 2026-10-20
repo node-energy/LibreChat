@@ -1,15 +1,47 @@
 const { Keyv } = require('keyv');
 const uap = require('ua-parser-js');
 const { logger } = require('@librechat/data-schemas');
-const { isEnabled, keyvMongo } = require('@librechat/api');
-const { ViolationTypes } = require('librechat-data-provider');
-const { removePorts } = require('~/server/utils');
-const denyRequest = require('./denyRequest');
+const { ErrorTypes, ViolationTypes } = require('librechat-data-provider');
+const { isEnabled, keyvMongo, removePorts, getBanIp } = require('@librechat/api');
 const { getLogStores } = require('~/cache');
+const { isOAuthNavigation, redirectOAuthFailure } = require('./oauthNavigation');
+const denyRequest = require('./denyRequest');
 const { findUser } = require('~/models');
 
 const banCache = new Keyv({ store: keyvMongo, namespace: ViolationTypes.BAN, ttl: 0 });
 const message = 'Your account has been temporarily banned due to violations of our service.';
+const AGENT_CHAT_PATH = '/api/agents/chat';
+const AGENT_CHAT_POST_CONTROL_ROUTES = new Set(['abort', 'steer']);
+
+/** @returns {string} Cache key for ban lookups, prefixed for Redis or raw for MongoDB */
+const getBanCacheKey = (prefix, value, useRedis) => {
+  if (!value) {
+    return '';
+  }
+  return useRedis ? `ban_cache:${prefix}:${value}` : value;
+};
+
+/** Returns whether this request starts or resumes an interactive agent chat turn. */
+const isInteractiveAgentChatRequest = (req) => {
+  if (req.method !== 'POST' || req.baseUrl !== '/api/agents' || req.body == null) {
+    return false;
+  }
+
+  const pathname = req.originalUrl.split('?')[0].replace(/\/$/, '');
+  if (pathname === AGENT_CHAT_PATH) {
+    return true;
+  }
+  if (!pathname.startsWith(`${AGENT_CHAT_PATH}/`)) {
+    return false;
+  }
+
+  const route = pathname.slice(`${AGENT_CHAT_PATH}/`.length);
+  return (
+    route.length > 0 &&
+    !route.includes('/') &&
+    !AGENT_CHAT_POST_CONTROL_ROUTES.has(route.toLowerCase())
+  );
+};
 
 /**
  * Respond to the request if the user is banned.
@@ -19,14 +51,17 @@ const message = 'Your account has been temporarily banned due to violations of o
  * @param {Object} req - Express Request object.
  * @param {Object} res - Express Response object.
  *
- * @returns {Promise<Object>} - Returns a Promise which when resolved sends a response status of 403 with a specific message if request is not of api/ask or api/edit types. If it is, calls `denyRequest()` function.
+ * @returns {Promise<Object>} - Returns a Promise which sends a JSON 403, unless this is an interactive browser agent chat request (`denyRequest()`) or an OAuth browser navigation (redirect to the login page).
  */
 const banResponse = async (req, res) => {
+  if (isOAuthNavigation(req)) {
+    return redirectOAuthFailure(res, ErrorTypes.AUTH_BANNED);
+  }
+
   const ua = uap(req.headers['user-agent']);
-  const { baseUrl } = req;
   if (!ua.browser.name) {
     return res.status(403).json({ message });
-  } else if (baseUrl === '/api/ask' || baseUrl === '/api/edit') {
+  } else if (isInteractiveAgentChatRequest(req)) {
     return await denyRequest(req, res, { type: ViolationTypes.BAN });
   }
 
@@ -53,36 +88,28 @@ const checkBan = async (req, res, next = () => {}) => {
     }
 
     req.ip = removePorts(req);
-    let userId = req.user?.id ?? req.user?._id ?? null;
+    const banIp = getBanIp(req);
+    let userId = req.user?.id ?? req.user?._id?.toString() ?? null;
 
     if (!userId && req?.body?.email) {
       const user = await findUser({ email: req.body.email }, '_id');
       userId = user?._id ? user._id.toString() : userId;
     }
 
-    if (!userId && !req.ip) {
+    if (!userId && !banIp) {
       return next();
     }
 
-    let cachedIPBan;
-    let cachedUserBan;
+    const useRedis = isEnabled(process.env.USE_REDIS);
+    const ipKey = getBanCacheKey('ip', banIp, useRedis);
+    const userKey = getBanCacheKey('user', userId, useRedis);
 
-    let ipKey = '';
-    let userKey = '';
+    const [cachedIPBan, cachedUserBan] = await Promise.all([
+      ipKey ? banCache.get(ipKey) : undefined,
+      userKey ? banCache.get(userKey) : undefined,
+    ]);
 
-    if (req.ip) {
-      ipKey = isEnabled(process.env.USE_REDIS) ? `ban_cache:ip:${req.ip}` : req.ip;
-      cachedIPBan = await banCache.get(ipKey);
-    }
-
-    if (userId) {
-      userKey = isEnabled(process.env.USE_REDIS) ? `ban_cache:user:${userId}` : userId;
-      cachedUserBan = await banCache.get(userKey);
-    }
-
-    const cachedBan = cachedIPBan || cachedUserBan;
-
-    if (cachedBan) {
+    if (cachedIPBan || cachedUserBan) {
       req.banned = true;
       return await banResponse(req, res);
     }
@@ -94,41 +121,47 @@ const checkBan = async (req, res, next = () => {}) => {
       return next();
     }
 
-    let ipBan;
-    let userBan;
+    const [ipBan, userBan] = await Promise.all([
+      banIp ? banLogs.get(banIp) : undefined,
+      userId ? banLogs.get(userId) : undefined,
+    ]);
 
-    if (req.ip) {
-      ipBan = await banLogs.get(req.ip);
-    }
+    const banData = ipBan || userBan;
 
-    if (userId) {
-      userBan = await banLogs.get(userId);
-    }
-
-    const isBanned = !!(ipBan || userBan);
-
-    if (!isBanned) {
+    if (!banData) {
       return next();
     }
 
-    const timeLeft = Number(isBanned.expiresAt) - Date.now();
-
-    if (timeLeft <= 0 && ipKey) {
-      await banLogs.delete(ipKey);
+    const expiresAt = Number(banData.expiresAt);
+    if (!banData.expiresAt || isNaN(expiresAt)) {
+      req.banned = true;
+      return await banResponse(req, res);
     }
 
-    if (timeLeft <= 0 && userKey) {
-      await banLogs.delete(userKey);
+    const timeLeft = expiresAt - Date.now();
+
+    if (timeLeft <= 0) {
+      const cleanups = [];
+      if (ipBan) {
+        cleanups.push(banLogs.delete(banIp));
+      }
+      if (userBan) {
+        cleanups.push(banLogs.delete(userId));
+      }
+      await Promise.all(cleanups);
       return next();
     }
 
+    const cacheWrites = [];
     if (ipKey) {
-      banCache.set(ipKey, isBanned, timeLeft);
+      cacheWrites.push(banCache.set(ipKey, banData, timeLeft));
     }
-
     if (userKey) {
-      banCache.set(userKey, isBanned, timeLeft);
+      cacheWrites.push(banCache.set(userKey, banData, timeLeft));
     }
+    await Promise.all(cacheWrites).catch((err) =>
+      logger.warn('[checkBan] Failed to write ban cache:', err),
+    );
 
     req.banned = true;
     return await banResponse(req, res);

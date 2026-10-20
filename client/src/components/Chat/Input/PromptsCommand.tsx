@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback } from 'react';
 import { AutoSizer, List } from 'react-virtualized';
-import { Spinner, useCombobox } from '@librechat/client';
 import { useSetRecoilState, useRecoilValue } from 'recoil';
+import { Input, Spinner, useCombobox, useRemScale } from '@librechat/client';
 import type { TPromptGroup } from 'librechat-data-provider';
 import type { PromptOption } from '~/common';
+import useInitPopoverInput from '~/hooks/Input/useInitPopoverInput';
 import { removeCharIfLast, detectVariables } from '~/utils';
-import VariableDialog from '~/components/Prompts/Groups/VariableDialog';
+import { useRecordPromptUsage } from '~/data-provider';
+import { VariableDialog } from '~/components/Prompts';
 import { usePromptGroupsContext } from '~/Providers';
+import { activateCatalog } from '~/hooks';
 import MentionItem from './MentionItem';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
@@ -20,12 +23,14 @@ const PopoverContainer = memo(
     isVariableDialogOpen,
     variableGroup,
     setVariableDialogOpen,
+    textAreaRef,
   }: {
     index: number;
     children: React.ReactNode;
     isVariableDialogOpen: boolean;
     variableGroup: TPromptGroup | null;
     setVariableDialogOpen: (isOpen: boolean) => void;
+    textAreaRef: React.MutableRefObject<HTMLTextAreaElement | null>;
   }) => {
     const showPromptsPopover = useRecoilValue(store.showPromptsPopoverFamily(index));
     return (
@@ -33,7 +38,12 @@ const PopoverContainer = memo(
         {showPromptsPopover ? children : null}
         <VariableDialog
           open={isVariableDialogOpen}
-          onClose={() => setVariableDialogOpen(false)}
+          onClose={() => {
+            setVariableDialogOpen(false);
+            requestAnimationFrame(() => {
+              textAreaRef.current?.focus();
+            });
+          }}
           group={variableGroup}
         />
       </>
@@ -41,7 +51,7 @@ const PopoverContainer = memo(
   },
 );
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 44;
 
 function PromptsCommand({
   index,
@@ -53,8 +63,12 @@ function PromptsCommand({
   submitPrompt: (textPrompt: string) => void;
 }) {
   const localize = useLocalize();
-  const { allPromptGroups, hasAccess } = usePromptGroupsContext();
-  const { data, isLoading } = allPromptGroups;
+  const remScale = useRemScale();
+  const { mutate: recordUsage } = useRecordPromptUsage();
+  const promptGroupsContext = usePromptGroupsContext();
+  const { allPromptGroups, hasAccess, requestAllPromptGroups } = promptGroupsContext ?? {};
+  const { data, isLoading } = allPromptGroups ?? {};
+  const showPromptsPopover = useRecoilValue(store.showPromptsPopoverFamily(index));
 
   const [activeIndex, setActiveIndex] = useState(0);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -69,6 +83,14 @@ function PromptsCommand({
   const { open, setOpen, searchValue, setSearchValue, matches } = useCombobox({
     value: '',
     options: prompts ?? [],
+  });
+
+  const initInputRef = useInitPopoverInput({
+    inputRef,
+    textAreaRef,
+    commandChar,
+    setSearchValue,
+    setOpen,
   });
 
   const handleSelect = useCallback(
@@ -100,18 +122,43 @@ function PromptsCommand({
         return;
       } else {
         submitPrompt(group.productionPrompt?.prompt ?? '');
+        if (group._id) {
+          recordUsage(group._id);
+        }
       }
     },
-    [setSearchValue, setOpen, setShowPromptsPopover, textAreaRef, promptsMap, submitPrompt],
+    [
+      setSearchValue,
+      setOpen,
+      setShowPromptsPopover,
+      textAreaRef,
+      promptsMap,
+      submitPrompt,
+      recordUsage,
+    ],
   );
 
   useEffect(() => {
     if (!open) {
       setActiveIndex(0);
+      setSearchValue('');
     } else {
+      /** Opening the picker before background warmup starts the fetch now */
+      activateCatalog('prompts');
       setVariableGroup(null);
     }
-  }, [open]);
+  }, [open, setSearchValue]);
+
+  /** The full prompt list is fetched on first popover open, not at app startup */
+  useEffect(() => {
+    if (showPromptsPopover) {
+      requestAllPromptGroups?.();
+    }
+  }, [showPromptsPopover, requestAllPromptGroups]);
+
+  useEffect(() => {
+    setActiveIndex((prev) => Math.min(prev, Math.max(matches.length - 1, 0)));
+  }, [matches.length]);
 
   useEffect(() => {
     return () => {
@@ -167,16 +214,15 @@ function PromptsCommand({
       isVariableDialogOpen={isVariableDialogOpen}
       variableGroup={variableGroup}
       setVariableDialogOpen={setVariableDialogOpen}
+      textAreaRef={textAreaRef}
     >
       <div className="absolute bottom-28 z-10 w-full space-y-2">
-        <div className="popover border-token-border-light rounded-2xl border bg-surface-tertiary-alt p-2 shadow-lg">
-          <input
-            // The user expects focus to transition to the input field when the popover is opened
-            // eslint-disable-next-line jsx-a11y/no-autofocus
-            autoFocus
-            ref={inputRef}
+        <div className="popover border-border-light bg-surface-tertiary-alt rounded-theme-popover border p-2 shadow-lg">
+          <Input
+            ref={initInputRef}
             placeholder={localize('com_ui_command_usage_placeholder')}
-            className="mb-1 w-full border-0 bg-surface-tertiary-alt p-2 text-sm focus:outline-none dark:text-gray-200"
+            variant="embedded"
+            className="mb-1"
             autoComplete="off"
             value={searchValue}
             onKeyDown={(e) => {
@@ -186,10 +232,23 @@ function PromptsCommand({
                 textAreaRef.current?.focus();
               }
               if (e.key === 'ArrowDown') {
+                if (matches.length === 0) {
+                  return;
+                }
                 setActiveIndex((prevIndex) => (prevIndex + 1) % matches.length);
               } else if (e.key === 'ArrowUp') {
+                if (matches.length === 0) {
+                  return;
+                }
                 setActiveIndex((prevIndex) => (prevIndex - 1 + matches.length) % matches.length);
               } else if (e.key === 'Enter' || e.key === 'Tab') {
+                if (matches.length === 0) {
+                  e.preventDefault();
+                  setOpen(false);
+                  setShowPromptsPopover(false);
+                  textAreaRef.current?.focus();
+                  return;
+                }
                 if (e.key === 'Enter') {
                   e.preventDefault();
                 }
@@ -209,38 +268,28 @@ function PromptsCommand({
               }, 150);
             }}
           />
-          <div className="max-h-40 overflow-y-auto">
-            {(() => {
-              if (isLoading && open) {
-                return (
-                  <div className="flex h-32 items-center justify-center text-text-primary">
-                    <Spinner />
-                  </div>
-                );
-              }
-
-              if (!isLoading && open) {
-                return (
-                  <div className="max-h-40">
-                    <AutoSizer disableHeight>
-                      {({ width }) => (
-                        <List
-                          width={width}
-                          overscanRowCount={5}
-                          rowHeight={ROW_HEIGHT}
-                          rowCount={matches.length}
-                          rowRenderer={rowRenderer}
-                          scrollToIndex={activeIndex}
-                          height={Math.min(matches.length * ROW_HEIGHT, 160)}
-                        />
-                      )}
-                    </AutoSizer>
-                  </div>
-                );
-              }
-              return null;
-            })()}
-          </div>
+          {open && isLoading && matches.length === 0 && (
+            <div className="text-text-primary flex h-32 items-center justify-center">
+              <Spinner />
+            </div>
+          )}
+          {open && matches.length > 0 && (
+            <div className="max-h-40">
+              <AutoSizer disableHeight>
+                {({ width }) => (
+                  <List
+                    width={width}
+                    overscanRowCount={5}
+                    rowHeight={ROW_HEIGHT * remScale}
+                    rowCount={matches.length}
+                    rowRenderer={rowRenderer}
+                    scrollToIndex={activeIndex}
+                    height={Math.min(matches.length * ROW_HEIGHT, 160) * remScale}
+                  />
+                )}
+              </AutoSizer>
+            </div>
+          )}
         </div>
       </div>
     </PopoverContainer>

@@ -1,6 +1,11 @@
+import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
 import debounce from 'lodash/debounce';
-import React, { createContext, useContext, useState, useMemo } from 'react';
-import { EModelEndpoint, isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider';
+import {
+  EModelEndpoint,
+  PermissionBits,
+  isAgentsEndpoint,
+  isAssistantsEndpoint,
+} from 'librechat-data-provider';
 import type * as t from 'librechat-data-provider';
 import type { Endpoint, SelectedValues } from '~/common';
 import {
@@ -8,8 +13,9 @@ import {
   useSelectorEffects,
   useKeyDialog,
   useEndpoints,
+  useLocalize,
 } from '~/hooks';
-import { useAgentsMapContext, useAssistantsMapContext } from '~/Providers';
+import { useAgentsMapContext, useAssistantsMapContext, useLiveAnnouncer } from '~/Providers';
 import { useGetEndpointsQuery, useListAgentsQuery } from '~/data-provider';
 import { useModelSelectorChatContext } from './ModelSelectorChatContext';
 import useSelectMention from '~/hooks/Input/useSelectMention';
@@ -57,9 +63,12 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
   const agentsMap = useAgentsMapContext();
   const assistantsMap = useAssistantsMapContext();
   const { data: endpointsConfig } = useGetEndpointsQuery();
-  const { endpoint, model, spec, agent_id, assistant_id, conversation, newConversation } =
+  const { endpoint, model, spec, agent_id, assistant_id, getConversation, newConversation } =
     useModelSelectorChatContext();
+  const localize = useLocalize();
+  const { announcePolite } = useLiveAnnouncer();
   const modelSpecs = useMemo(() => {
+    /** Labels are normalized at the startup-config query boundary. */
     const specs = startupConfig?.modelSpecs?.list ?? [];
     if (!agentsMap) {
       return specs;
@@ -79,11 +88,27 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
   }, [startupConfig, agentsMap]);
 
   const permissionLevel = useAgentDefaultPermissionLevel();
-  const { data: agents = null } = useListAgentsQuery(
-    { requiredPermission: permissionLevel },
-    {
-      select: (data) => data?.data,
+  /**
+   * Always query the VIEW scope so this shares one cache entry (and one paginated walk)
+   * with `useAgentsMap` and `useMentions`. Asking for EDIT here spawned a second full
+   * fetch under its own key, holding a duplicate copy of the whole agent list. The
+   * marketplace's "my agents" framing is preserved by filtering on `isEditable`, which
+   * the list endpoint resolves from the same ACL read it already performs.
+   */
+  const wantsEditableOnly = permissionLevel === PermissionBits.EDIT;
+  const selectAgents = useCallback(
+    (data: t.AgentListResponse) => {
+      const list = data?.data;
+      if (!wantsEditableOnly) {
+        return list;
+      }
+      return list?.filter((agent) => agent.isEditable !== false);
     },
+    [wantsEditableOnly],
+  );
+  const { data: agents = null } = useListAgentsQuery(
+    { requiredPermission: PermissionBits.VIEW },
+    { select: selectAgents },
   );
 
   const { mappedEndpoints, endpointRequiresUserKey } = useEndpoints({
@@ -93,10 +118,25 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
     endpointsConfig,
   });
 
+  const getModelDisplayName = useCallback(
+    (endpoint: Endpoint, model: string): string => {
+      if (isAgentsEndpoint(endpoint.value)) {
+        return endpoint.agentNames?.[model] ?? agentsMap?.[model]?.name ?? model;
+      }
+
+      if (isAssistantsEndpoint(endpoint.value)) {
+        return endpoint.assistantNames?.[model] ?? model;
+      }
+
+      return model;
+    },
+    [agentsMap],
+  );
+
   const { onSelectEndpoint, onSelectSpec } = useSelectMention({
     // presets,
     modelSpecs,
-    conversation,
+    getConversation,
     assistantsMap,
     endpointsConfig,
     newConversation,
@@ -104,10 +144,18 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
   });
 
   // State
-  const [selectedValues, setSelectedValues] = useState<SelectedValues>({
-    endpoint: endpoint || '',
-    model: model || '',
-    modelSpec: spec || '',
+  const [selectedValues, setSelectedValues] = useState<SelectedValues>(() => {
+    let initialModel = model || '';
+    if (isAgentsEndpoint(endpoint) && agent_id) {
+      initialModel = agent_id;
+    } else if (isAssistantsEndpoint(endpoint) && assistant_id) {
+      initialModel = assistant_id;
+    }
+    return {
+      endpoint: endpoint || '',
+      model: initialModel,
+      modelSpec: spec || '',
+    };
   });
   useSelectorEffects({
     agentsMap,
@@ -135,8 +183,8 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
       return null;
     }
     const allItems = [...modelSpecs, ...mappedEndpoints];
-    return filterItems(allItems, searchValue, agentsMap, assistantsMap || {});
-  }, [searchValue, modelSpecs, mappedEndpoints, agentsMap, assistantsMap]);
+    return filterItems(allItems, searchValue, agentsMap, assistantsMap || {}, localize);
+  }, [searchValue, modelSpecs, mappedEndpoints, agentsMap, assistantsMap, localize]);
 
   const setDebouncedSearchValue = useMemo(
     () =>
@@ -145,86 +193,117 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
       }, 200),
     [],
   );
-  const setEndpointSearchValue = (endpoint: string, value: string) => {
+  const setEndpointSearchValue = useCallback((endpoint: string, value: string) => {
     setEndpointSearchValues((prev) => ({
       ...prev,
       [endpoint]: value,
     }));
-  };
+  }, []);
 
-  const handleSelectSpec = (spec: t.TModelSpec) => {
-    let model = spec.preset.model ?? null;
-    onSelectSpec?.(spec);
-    if (isAgentsEndpoint(spec.preset.endpoint)) {
-      model = spec.preset.agent_id ?? '';
-    } else if (isAssistantsEndpoint(spec.preset.endpoint)) {
-      model = spec.preset.assistant_id ?? '';
-    }
-    setSelectedValues({
-      endpoint: spec.preset.endpoint,
-      model,
-      modelSpec: spec.name,
-    });
-  };
+  const handleSelectSpec = useCallback(
+    (spec: t.TModelSpec) => {
+      let model = spec.preset.model ?? null;
+      onSelectSpec?.(spec);
+      /** Specs arrive with `preset.endpoint` materialized at config load. */
+      const endpoint = spec.preset.endpoint ?? null;
+      if (isAgentsEndpoint(endpoint)) {
+        model = spec.preset.agent_id ?? '';
+      } else if (isAssistantsEndpoint(endpoint)) {
+        model = spec.preset.assistant_id ?? '';
+      }
+      setSelectedValues({
+        endpoint,
+        model,
+        modelSpec: spec.name,
+      });
+    },
+    [onSelectSpec],
+  );
 
-  const handleSelectEndpoint = (endpoint: Endpoint) => {
-    if (!endpoint.hasModels) {
-      if (endpoint.value) {
-        onSelectEndpoint?.(endpoint.value);
+  const handleSelectEndpoint = useCallback(
+    (endpoint: Endpoint) => {
+      if (!endpoint.hasModels) {
+        if (endpoint.value) {
+          onSelectEndpoint?.(endpoint.value);
+        }
+        setSelectedValues({
+          endpoint: endpoint.value,
+          model: '',
+          modelSpec: '',
+        });
+      }
+    },
+    [onSelectEndpoint],
+  );
+
+  const handleSelectModel = useCallback(
+    (endpoint: Endpoint, model: string) => {
+      if (isAgentsEndpoint(endpoint.value)) {
+        onSelectEndpoint?.(endpoint.value, {
+          agent_id: model,
+          model: agentsMap?.[model]?.model ?? '',
+        });
+      } else if (isAssistantsEndpoint(endpoint.value)) {
+        onSelectEndpoint?.(endpoint.value, {
+          assistant_id: model,
+          model: assistantsMap?.[endpoint.value]?.[model]?.model ?? '',
+        });
+      } else if (endpoint.value) {
+        onSelectEndpoint?.(endpoint.value, { model });
       }
       setSelectedValues({
         endpoint: endpoint.value,
-        model: '',
+        model,
         modelSpec: '',
       });
-    }
-  };
 
-  const handleSelectModel = (endpoint: Endpoint, model: string) => {
-    if (isAgentsEndpoint(endpoint.value)) {
-      onSelectEndpoint?.(endpoint.value, {
-        agent_id: model,
-        model: agentsMap?.[model]?.model ?? '',
-      });
-    } else if (isAssistantsEndpoint(endpoint.value)) {
-      onSelectEndpoint?.(endpoint.value, {
-        assistant_id: model,
-        model: assistantsMap?.[endpoint.value]?.[model]?.model ?? '',
-      });
-    } else if (endpoint.value) {
-      onSelectEndpoint?.(endpoint.value, { model });
-    }
-    setSelectedValues({
-      endpoint: endpoint.value,
-      model,
-      modelSpec: '',
-    });
-  };
+      const modelDisplayName = getModelDisplayName(endpoint, model);
+      const announcement = localize('com_ui_model_selected', { 0: modelDisplayName });
+      announcePolite({ message: announcement, isStatus: true });
+    },
+    [agentsMap, announcePolite, assistantsMap, getModelDisplayName, localize, onSelectEndpoint],
+  );
 
-  const value = {
-    // State
-    searchValue,
-    searchResults,
-    selectedValues,
-    endpointSearchValues,
-    // LibreChat
-    agentsMap,
-    modelSpecs,
-    assistantsMap,
-    mappedEndpoints,
-    endpointsConfig,
-
-    // Functions
-    handleSelectSpec,
-    handleSelectModel,
-    setSelectedValues,
-    handleSelectEndpoint,
-    setEndpointSearchValue,
-    endpointRequiresUserKey,
-    setSearchValue: setDebouncedSearchValue,
-    // Dialog
-    ...keyProps,
-  };
+  const value = useMemo(
+    () => ({
+      searchValue,
+      searchResults,
+      selectedValues,
+      endpointSearchValues,
+      agentsMap,
+      modelSpecs,
+      assistantsMap,
+      mappedEndpoints,
+      endpointsConfig,
+      handleSelectSpec,
+      handleSelectModel,
+      setSelectedValues,
+      handleSelectEndpoint,
+      setEndpointSearchValue,
+      endpointRequiresUserKey,
+      setSearchValue: setDebouncedSearchValue,
+      ...keyProps,
+    }),
+    [
+      searchValue,
+      searchResults,
+      selectedValues,
+      endpointSearchValues,
+      agentsMap,
+      modelSpecs,
+      assistantsMap,
+      mappedEndpoints,
+      endpointsConfig,
+      handleSelectSpec,
+      handleSelectModel,
+      setSelectedValues,
+      handleSelectEndpoint,
+      setEndpointSearchValue,
+      endpointRequiresUserKey,
+      setDebouncedSearchValue,
+      keyProps,
+    ],
+  );
 
   return <ModelSelectorContext.Provider value={value}>{children}</ModelSelectorContext.Provider>;
 }

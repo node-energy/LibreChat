@@ -59,7 +59,7 @@ describe('useAgentToolPermissions', () => {
       mockUseAgentsMapContext.mockReturnValue({});
       mockUseGetAgentByIdQuery.mockReturnValue({ data: undefined });
 
-      const { result } = renderHook(() => useAgentToolPermissions('non-existent-agent'));
+      const { result } = renderHook(() => useAgentToolPermissions('agent_nonexistent'));
 
       expect(result.current.fileSearchAllowedByAgent).toBe(false);
       expect(result.current.codeAllowedByAgent).toBe(false);
@@ -69,7 +69,7 @@ describe('useAgentToolPermissions', () => {
 
   describe('when agent is found with tools', () => {
     it('should allow tools that are included in the agent tools array', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agent = {
         id: agentId,
         tools: [Tools.file_search],
@@ -86,7 +86,7 @@ describe('useAgentToolPermissions', () => {
     });
 
     it('should allow both tools when both are included', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agent = {
         id: agentId,
         tools: [Tools.file_search, Tools.execute_code],
@@ -103,7 +103,7 @@ describe('useAgentToolPermissions', () => {
     });
 
     it('should use data from API query when available', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agentMapData = {
         id: agentId,
         tools: [Tools.file_search],
@@ -124,8 +124,60 @@ describe('useAgentToolPermissions', () => {
       expect(result.current.tools).toEqual([Tools.execute_code, Tools.file_search]);
     });
 
+    it('should use the hydrated code environment when available', () => {
+      const agentId = 'agent_test';
+      mockUseAgentsMapContext.mockReturnValue({
+        [agentId]: {
+          id: agentId,
+          tools: [Tools.execute_code],
+          code_environment_id: 'stale',
+          stateful_code_sessions: false,
+        },
+      });
+      mockUseGetAgentByIdQuery.mockReturnValue({
+        data: {
+          id: agentId,
+          tools: [Tools.execute_code],
+          code_environment_id: 'attached-vm',
+          stateful_code_sessions: true,
+        },
+      });
+
+      const { result } = renderHook(() => useAgentToolPermissions(agentId));
+
+      expect(result.current.codeEnvironmentId).toBe('attached-vm');
+      expect(result.current.statefulCodeSessionsAllowedByAgent).toBe(true);
+    });
+
+    it('preserves execution graph metadata omitted by the basic agent response', () => {
+      const agentId = 'agent_test';
+      mockUseAgentsMapContext.mockReturnValue({
+        [agentId]: {
+          id: agentId,
+          tools: [Tools.execute_code],
+          code_environment_id: 'attached-vm',
+          code_workspace_id: 'project-a',
+          stateful_code_sessions: true,
+          agent_ids: ['agent-child'],
+        },
+      });
+      mockUseGetAgentByIdQuery.mockReturnValue({
+        data: { id: agentId, name: 'Safe agent response' },
+      });
+
+      const { result } = renderHook(() => useAgentToolPermissions(agentId));
+
+      expect(result.current.agent).toMatchObject({
+        id: agentId,
+        name: 'Safe agent response',
+        code_environment_id: 'attached-vm',
+        code_workspace_id: 'project-a',
+        agent_ids: ['agent-child'],
+      });
+    });
+
     it('should fallback to agent map data when API data is not available', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agentMapData = {
         id: agentId,
         tools: [Tools.execute_code],
@@ -144,7 +196,7 @@ describe('useAgentToolPermissions', () => {
 
   describe('when agent has no tools', () => {
     it('should disallow all tools with empty array', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agent = {
         id: agentId,
         tools: [],
@@ -161,7 +213,7 @@ describe('useAgentToolPermissions', () => {
     });
 
     it('should disallow all tools with undefined tools', () => {
-      const agentId = 'test-agent';
+      const agentId = 'agent_test';
       const agent = {
         id: agentId,
         tools: undefined,
@@ -226,7 +278,7 @@ describe('useAgentToolPermissions', () => {
     });
 
     it('should not affect regular agents when ephemeralAgent is provided', () => {
-      const agentId = 'regular-agent';
+      const agentId = 'agent_regular';
       const agent = {
         id: agentId,
         tools: [Tools.file_search],

@@ -47,7 +47,9 @@ librechat:
   existingSecretName: "librechat-credentials-env"
 
   # For adding a custom config yaml-file you can set the contents in this var. See https://www.librechat.ai/docs/configuration/librechat_yaml/example
-  configYamlContent:
+  # NOTE: must be a literal block scalar (string), not a YAML map — the chart
+  # renders it with `| indent 4` and no longer runs `toYaml` over it.
+  configYamlContent: |
     version: 1.0.8
 
     cache: false
@@ -66,22 +68,6 @@ librechat:
 
     endpoints:
       custom:
-#        - name: "openai-gpt-5"
-#          baseURL: https://api.openai.com/v1
-#          apiKey: ${NE_OPENAI_API_KEY}
-#          models:
-#            fetch: true
-#            default:
-#              - gpt-5
-#
-#        - name: "openai-gpt-5-mini"
-#          baseURL: https://api.openai.com/v1
-#          apiKey: ${NE_OPENAI_API_KEY}
-#          models:
-#            fetch: true
-#            default:
-#              - gpt-5-mini
-
         - name: "claude-opus-4-8"
           baseURL: "https://api.anthropic.com/v1/"
           apiKey: ${NE_ANTHROPIC_API_KEY}
@@ -364,7 +350,6 @@ librechat:
       #          - "mcp-server-time"
       #        serverInstructions: "Use only public resources; do not access local files or internal networks."
 
-
   # name of existing Yaml configmap, key must be librechat.yaml
   existingConfigYaml: ""
 
@@ -383,7 +368,8 @@ librechat-rag-api:
 
 
 image:
-  repository: danny-avila/librechat
+  # Images moved to the LibreChat-AI org; danny-avila/* stopped publishing after v0.8.0.
+  repository: librechat-ai/librechat
   registry: ghcr.io
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.

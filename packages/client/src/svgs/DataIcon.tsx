@@ -1,4 +1,6 @@
-export default function DataIcon({ className = 'icon-sm' }: { className?: string }) {
+import { JSX } from 'react/jsx-runtime';
+
+export default function DataIcon({ className = 'icon-sm' }: { className?: string }): JSX.Element {
   return (
     <svg
       width="18"
@@ -7,6 +9,7 @@ export default function DataIcon({ className = 'icon-sm' }: { className?: string
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden="true"
     >
       <path
         fillRule="evenodd"

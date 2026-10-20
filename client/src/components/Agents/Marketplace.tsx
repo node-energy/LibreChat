@@ -1,529 +1,185 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useRecoilState } from 'recoil';
-import { useOutletContext } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
-import { TooltipAnchor, Button, NewChatIcon, useMediaQuery } from '@librechat/client';
-import { PermissionTypes, Permissions, QueryKeys } from 'librechat-data-provider';
 import type t from 'librechat-data-provider';
-import type { ContextType } from '~/common';
-import { useDocumentTitle, useHasAccess, useLocalize, TranslationKeys } from '~/hooks';
 import { useGetEndpointsQuery, useGetAgentCategoriesQuery } from '~/data-provider';
+import SortDropdown, { SORT_OPTIONS, DEFAULT_SORT_OPTION } from './SortDropdown';
+import { useDocumentTitle, useHasAccess, useLocalize } from '~/hooks';
 import MarketplaceAdminSettings from './MarketplaceAdminSettings';
-import { SidePanelProvider, useChatContext } from '~/Providers';
+import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
+import useDrawerViewport from '~/hooks/Nav/useDrawerViewport';
 import { SidePanelGroup } from '~/components/SidePanel';
-import { OpenSidebar } from '~/components/Chat/Menus';
-import { cn, clearMessagesCache } from '~/utils';
+import MineFilterToggle from './MineFilterToggle';
 import CategoryTabs from './CategoryTabs';
-import AgentDetail from './AgentDetail';
 import SearchBar from './SearchBar';
 import AgentGrid from './AgentGrid';
-import store from '~/store';
 
 interface AgentMarketplaceProps {
   className?: string;
 }
 
-/**
- * AgentMarketplace - Main component for browsing and discovering agents
- *
- * Provides tabbed navigation for different agent categories,
- * search functionality, and detailed agent view through a modal dialog.
- * Uses URL parameters for state persistence and deep linking.
- */
 const AgentMarketplace: React.FC<AgentMarketplaceProps> = ({ className = '' }) => {
   const localize = useLocalize();
   const navigate = useNavigate();
   const { category } = useParams();
-  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { conversation, newConversation } = useChatContext();
-
-  const isSmallScreen = useMediaQuery('(max-width: 768px)');
-  const { navVisible, setNavVisible } = useOutletContext<ContextType>();
-  const [hideSidePanel, setHideSidePanel] = useRecoilState(store.hideSidePanel);
-
-  // Get URL parameters
-  const searchQuery = searchParams.get('q') || '';
-  const selectedAgentId = searchParams.get('agent_id') || '';
-
-  // Animation state
-  type Direction = 'left' | 'right';
-  // Initialize with a default value to prevent rendering issues
-  const [displayCategory, setDisplayCategory] = useState<string>(category || 'all');
-  const [nextCategory, setNextCategory] = useState<string | null>(null);
-  const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
-  const [animationDirection, setAnimationDirection] = useState<Direction>('right');
-
-  // Ref for the scrollable container to enable infinite scroll
+  const isSmallScreen = useDrawerViewport();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const searchQuery = searchParams.get('q') || '';
+  const sort = useMemo<t.AgentSortOption>(() => {
+    const value = searchParams.get('sort');
+    return SORT_OPTIONS.some((option) => option.value === value)
+      ? (value as t.AgentSortOption)
+      : DEFAULT_SORT_OPTION;
+  }, [searchParams]);
+  const mine: 0 | 1 = searchParams.get('mine') === '1' ? 1 : 0;
 
-  // Local state
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [selectedAgent, setSelectedAgent] = useState<t.Agent | null>(null);
-
-  // Set page title
   useDocumentTitle(`${localize('com_agents_marketplace')} | LibreChat`);
-
-  // Ensure right sidebar is always visible in marketplace
-  useEffect(() => {
-    setHideSidePanel(false);
-
-    // Also try to force expand via localStorage
-    localStorage.setItem('hideSidePanel', 'false');
-    localStorage.setItem('fullPanelCollapse', 'false');
-  }, [setHideSidePanel, hideSidePanel]);
-
-  // Ensure endpoints config is loaded first (required for agent queries)
   useGetEndpointsQuery();
-
-  // Fetch categories using existing query pattern
   const categoriesQuery = useGetAgentCategoriesQuery({
-    staleTime: 1000 * 60 * 15, // 15 minutes - categories rarely change
+    staleTime: 1000 * 60 * 15,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,
   });
+  const hasPromotedCategory = categoriesQuery.data?.some((item) => item.value === 'promoted');
+  /* Turning the filter on from Top Picks navigates to `/agents/all`, because an authored
+     agent is rarely promoted. A restored or shared `/agents?mine=1` carries no path
+     category, so defaulting it to `promoted` would answer the same intent with the empty
+     promoted-and-mine intersection instead of the caller's agents. */
+  const defaultCategory = hasPromotedCategory && mine !== 1 ? 'promoted' : 'all';
+  const activeCategory = category || defaultCategory;
 
-  // Handle initial category when on /agents without a category
-  useEffect(() => {
-    if (
-      !category &&
-      window.location.pathname === '/agents' &&
-      categoriesQuery.data &&
-      displayCategory === 'all'
-    ) {
-      const hasPromoted = categoriesQuery.data.some((cat) => cat.value === 'promoted');
-      if (hasPromoted) {
-        // If promoted exists, update display to show it
-        setDisplayCategory('promoted');
-      }
-    }
-  }, [category, categoriesQuery.data, displayCategory]);
-
-  /**
-   * Handle agent card selection
-   *
-   * @param agent - The selected agent object
-   */
-  const handleAgentSelect = (agent: t.Agent) => {
-    // Update URL with selected agent
-    const newParams = new URLSearchParams(searchParams);
-    newParams.set('agent_id', agent.id);
-    setSearchParams(newParams);
-    setSelectedAgent(agent);
-    setIsDetailOpen(true);
-  };
-
-  /**
-   * Handle closing the agent detail dialog
-   */
-  const handleDetailClose = () => {
-    const newParams = new URLSearchParams(searchParams);
-    newParams.delete('agent_id');
-    setSearchParams(newParams);
-    setSelectedAgent(null);
-    setIsDetailOpen(false);
-  };
-
-  /**
-   * Determine ordered tabs to compute indices for direction
-   */
-  const orderedTabs = useMemo<string[]>(() => {
-    const dynamic = (categoriesQuery.data || []).map((c) => c.value);
-    // Only include values that actually exist in the categories
-    const set = new Set<string>(dynamic);
-    return Array.from(set);
-  }, [categoriesQuery.data]);
-
-  const getTabIndex = useCallback(
-    (tab: string): number => {
-      const idx = orderedTabs.indexOf(tab);
-      return idx >= 0 ? idx : 0;
-    },
-    [orderedTabs],
-  );
-
-  /**
-   * Handle category tab selection changes with directional animation
-   */
-  const handleTabChange = (tabValue: string) => {
-    if (tabValue === displayCategory || isTransitioning) {
-      // Ignore redundant or rapid clicks during transition
+  const handleTabChange = (value: string) => {
+    if (value === activeCategory) {
       return;
     }
-
-    const currentIndex = getTabIndex(displayCategory);
-    const newIndex = getTabIndex(tabValue);
-    const direction: Direction = newIndex > currentIndex ? 'right' : 'left';
-
-    setAnimationDirection(direction);
-    setNextCategory(tabValue);
-    setIsTransitioning(true);
-
-    // Update URL immediately, preserving current search params
-    const currentSearchParams = searchParams.toString();
-    const searchParamsStr = currentSearchParams ? `?${currentSearchParams}` : '';
-    if (tabValue === 'promoted') {
-      navigate(`/agents${searchParamsStr}`);
-    } else {
-      navigate(`/agents/${tabValue}${searchParamsStr}`);
+    const params = new URLSearchParams(searchParams);
+    /* Top Picks is a curated set, so the filter that sent the user to `/agents/all` when
+       they turned it on is released when they choose Top Picks again. Carrying it here
+       would resolve straight back to All below and make the tab unselectable. */
+    if (value === 'promoted') {
+      params.delete('mine');
     }
-
-    // Complete transition after 300ms
-    window.setTimeout(() => {
-      setDisplayCategory(tabValue);
-      setNextCategory(null);
-      setIsTransitioning(false);
-    }, 300);
+    navigate({
+      pathname: value === 'promoted' ? '/agents' : `/agents/${encodeURIComponent(value)}`,
+      search: params.toString(),
+    });
   };
 
-  /**
-   * Sync display when URL changes externally (back/forward)
-   */
-  useEffect(() => {
-    if (category && category !== displayCategory && !isTransitioning) {
-      // URL changed externally, update display without animation
-      setDisplayCategory(category);
-    }
-  }, [category, displayCategory, isTransitioning]);
-
-  // No longer needed with keyframes
-
-  /**
-   * Handle search query changes
-   *
-   * @param query - The search query string
-   */
   const handleSearch = (query: string) => {
-    const newParams = new URLSearchParams(searchParams);
-    const currentCategory = displayCategory;
-
+    const params = new URLSearchParams(searchParams);
     if (query.trim()) {
-      newParams.set('q', query.trim());
+      params.set('q', query.trim());
     } else {
-      newParams.delete('q');
+      params.delete('q');
     }
-
-    // Always preserve current category when searching or clearing search
-    if (currentCategory === 'promoted') {
-      navigate(`/agents${newParams.toString() ? `?${newParams.toString()}` : ''}`);
-    } else {
-      navigate(
-        `/agents/${currentCategory}${newParams.toString() ? `?${newParams.toString()}` : ''}`,
-      );
-    }
+    setSearchParams(params);
   };
 
-  /**
-   * Handle new chat button click
-   */
+  const handleSortChange = (value: t.AgentSortOption) => {
+    const params = new URLSearchParams(searchParams);
+    if (value === DEFAULT_SORT_OPTION) {
+      params.delete('sort');
+    } else {
+      params.set('sort', value);
+    }
+    setSearchParams(params);
+  };
 
-  const handleNewChat = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (e.button === 0 && (e.ctrlKey || e.metaKey)) {
-      window.open('/c/new', '_blank');
+  const handleMineChange = (checked: boolean) => {
+    const params = new URLSearchParams(searchParams);
+    if (checked) {
+      params.set('mine', '1');
+    } else {
+      params.delete('mine');
+    }
+    if (checked && activeCategory === 'promoted') {
+      navigate({ pathname: '/agents/all', search: params.toString() });
       return;
     }
-    clearMessagesCache(queryClient, conversation?.conversationId);
-    queryClient.invalidateQueries([QueryKeys.messages]);
-    newConversation();
+    /* Dropping the filter on a path that carries no category would hand the view back to
+       Top Picks, which is not what turning a filter off means. Name the category the user
+       was already looking at instead. */
+    if (!checked && category == null && activeCategory === 'all') {
+      navigate({ pathname: '/agents/all', search: params.toString() });
+      return;
+    }
+    setSearchParams(params);
   };
-
-  // Check if a detail view should be open based on URL
-  useEffect(() => {
-    setIsDetailOpen(!!selectedAgentId);
-  }, [selectedAgentId]);
-
-  // Layout configuration for SidePanelGroup
-  const defaultLayout = useMemo(() => {
-    const resizableLayout = localStorage.getItem('react-resizable-panels:layout');
-    return typeof resizableLayout === 'string' ? JSON.parse(resizableLayout) : undefined;
-  }, []);
-
-  const defaultCollapsed = useMemo(() => {
-    const collapsedPanels = localStorage.getItem('react-resizable-panels:collapsed');
-    return typeof collapsedPanels === 'string' ? JSON.parse(collapsedPanels) : true;
-  }, []);
-
-  const fullCollapse = useMemo(() => localStorage.getItem('fullPanelCollapse') === 'true', []);
 
   const hasAccessToMarketplace = useHasAccess({
     permissionType: PermissionTypes.MARKETPLACE,
     permission: Permissions.USE,
   });
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
-    if (!hasAccessToMarketplace) {
-      timeoutId = setTimeout(() => {
-        navigate('/c/new');
-      }, 1000);
+    if (hasAccessToMarketplace) {
+      return;
     }
-    return () => {
-      clearTimeout(timeoutId);
-    };
+    const timeoutId = setTimeout(() => navigate('/c/new'), 1000);
+    return () => clearTimeout(timeoutId);
   }, [hasAccessToMarketplace, navigate]);
 
   if (!hasAccessToMarketplace) {
     return null;
   }
+
   return (
-    <div className={`relative flex w-full grow overflow-hidden bg-presentation ${className}`}>
-      <SidePanelProvider>
-        <SidePanelGroup
-          defaultLayout={defaultLayout}
-          fullPanelCollapse={fullCollapse}
-          defaultCollapsed={defaultCollapsed}
+    <div
+      className={`bg-surface-primary-alt relative flex w-full grow overflow-hidden ${className}`}
+    >
+      <SidePanelGroup>
+        <main
+          className="flex h-full min-w-0 flex-col overflow-hidden"
+          aria-labelledby="marketplace-heading"
         >
-          <main className="flex h-full flex-col overflow-hidden" role="main">
-            {/* Scrollable container */}
-            <div
-              ref={scrollContainerRef}
-              className="scrollbar-gutter-stable relative flex h-full flex-col overflow-y-auto overflow-x-hidden"
-            >
-              {/* Simplified header for agents marketplace - only show nav controls when needed */}
-              {!isSmallScreen && (
-                <div className="sticky top-0 z-20 flex items-center justify-between bg-surface-secondary p-2 font-semibold text-text-primary md:h-14">
-                  <div className="mx-1 flex items-center gap-2">
-                    {!navVisible ? (
-                      <>
-                        <OpenSidebar setNavVisible={setNavVisible} />
-                        <TooltipAnchor
-                          description={localize('com_ui_new_chat')}
-                          render={
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              data-testid="agents-new-chat-button"
-                              aria-label={localize('com_ui_new_chat')}
-                              className="rounded-xl border border-border-light bg-surface-secondary p-2 hover:bg-surface-hover max-md:hidden"
-                              onClick={handleNewChat}
-                            >
-                              <NewChatIcon />
-                            </Button>
-                          }
-                        />
-                      </>
-                    ) : (
-                      // Invisible placeholder to maintain height
-                      <div className="h-10 w-10" />
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* Hero Section - scrolls away */}
-              {!isSmallScreen && (
-                <div className="container mx-auto max-w-4xl">
-                  <div className={cn('mb-8 text-center', 'mt-12')}>
-                    <h1 className="mb-3 text-3xl font-bold tracking-tight text-text-primary md:text-5xl">
-                      {localize('com_agents_marketplace')}
-                    </h1>
-                    <p className="mx-auto mb-6 max-w-2xl text-lg text-text-secondary">
-                      {localize('com_agents_marketplace_subtitle')}
-                    </p>
-                  </div>
-                </div>
-              )}
-              {/* Sticky wrapper for search bar and categories */}
-              <div
-                className={cn(
-                  'sticky z-10 bg-presentation pb-4',
-                  isSmallScreen ? 'top-0' : 'top-14',
-                )}
-              >
-                <div className="container mx-auto max-w-4xl px-4">
-                  {/* Search bar */}
-                  <div className="mx-auto flex max-w-2xl gap-2 pb-6">
-                    <SearchBar value={searchQuery} onSearch={handleSearch} />
-                    {/* TODO: Remove this once we have a better way to handle admin settings */}
-                    {/* Admin Settings */}
-                    <MarketplaceAdminSettings />
-                  </div>
-
-                  {/* Category tabs */}
-                  <CategoryTabs
-                    categories={categoriesQuery.data || []}
-                    activeTab={displayCategory}
-                    isLoading={categoriesQuery.isLoading}
-                    onChange={handleTabChange}
-                  />
-                </div>
-              </div>
-              {/* Scrollable content area */}
-              <div className="container mx-auto max-w-4xl px-4 pb-8">
-                {/* Two-pane animated container wrapping category header + grid */}
-                <div className="relative overflow-hidden">
-                  {/* Current content pane */}
-                  <div
-                    className={cn(
-                      isTransitioning &&
-                        (animationDirection === 'right'
-                          ? 'motion-safe:animate-slide-out-left'
-                          : 'motion-safe:animate-slide-out-right'),
-                    )}
-                    key={`pane-current-${displayCategory}`}
-                  >
-                    {/* Category header - only show when not searching */}
-                    {!searchQuery && (
-                      <div className="mb-6 mt-6">
-                        {(() => {
-                          // Get category data for display
-                          const getCategoryData = () => {
-                            if (displayCategory === 'promoted') {
-                              return {
-                                name: localize('com_agents_top_picks'),
-                                description: localize('com_agents_recommended'),
-                              };
-                            }
-                            if (displayCategory === 'all') {
-                              return {
-                                name: localize('com_agents_all'),
-                                description: localize('com_agents_all_description'),
-                              };
-                            }
-
-                            // Find the category in the API data
-                            const categoryData = categoriesQuery.data?.find(
-                              (cat) => cat.value === displayCategory,
-                            );
-                            if (categoryData) {
-                              return {
-                                name: categoryData.label?.startsWith('com_')
-                                  ? localize(categoryData.label as TranslationKeys)
-                                  : categoryData.label,
-                                description: categoryData.description?.startsWith('com_')
-                                  ? localize(categoryData.description as TranslationKeys)
-                                  : categoryData.description || '',
-                              };
-                            }
-
-                            // Fallback for unknown categories
-                            return {
-                              name:
-                                displayCategory.charAt(0).toUpperCase() + displayCategory.slice(1),
-                              description: '',
-                            };
-                          };
-
-                          const { name, description } = getCategoryData();
-
-                          return (
-                            <div className="text-left">
-                              <h2 className="text-2xl font-bold text-text-primary">{name}</h2>
-                              {description && (
-                                <p className="mt-2 text-text-secondary">{description}</p>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-
-                    {/* Agent grid */}
-                    <AgentGrid
-                      key={`grid-${displayCategory}`}
-                      category={displayCategory}
-                      searchQuery={searchQuery}
-                      onSelectAgent={handleAgentSelect}
-                      scrollElementRef={scrollContainerRef}
-                    />
-                  </div>
-
-                  {/* Next content pane, only during transition */}
-                  {isTransitioning && nextCategory && (
-                    <div
-                      className={cn(
-                        'absolute inset-0',
-                        animationDirection === 'right'
-                          ? 'motion-safe:animate-slide-in-right'
-                          : 'motion-safe:animate-slide-in-left',
-                      )}
-                      key={`pane-next-${nextCategory}-${animationDirection}`}
-                    >
-                      {/* Category header - only show when not searching */}
-                      {!searchQuery && (
-                        <div className="mb-6 mt-6">
-                          {(() => {
-                            // Get category data for display
-                            const getCategoryData = () => {
-                              if (nextCategory === 'promoted') {
-                                return {
-                                  name: localize('com_agents_top_picks'),
-                                  description: localize('com_agents_recommended'),
-                                };
-                              }
-                              if (nextCategory === 'all') {
-                                return {
-                                  name: localize('com_agents_all'),
-                                  description: localize('com_agents_all_description'),
-                                };
-                              }
-
-                              // Find the category in the API data
-                              const categoryData = categoriesQuery.data?.find(
-                                (cat) => cat.value === nextCategory,
-                              );
-                              if (categoryData) {
-                                return {
-                                  name: categoryData.label?.startsWith('com_')
-                                    ? localize(categoryData.label as TranslationKeys)
-                                    : categoryData.label,
-                                  description: categoryData.description?.startsWith('com_')
-                                    ? localize(
-                                        categoryData.description as Parameters<typeof localize>[0],
-                                      )
-                                    : categoryData.description || '',
-                                };
-                              }
-
-                              // Fallback for unknown categories
-                              return {
-                                name:
-                                  (nextCategory || '').charAt(0).toUpperCase() +
-                                  (nextCategory || '').slice(1),
-                                description: '',
-                              };
-                            };
-
-                            const { name, description } = getCategoryData();
-
-                            return (
-                              <div className="text-left">
-                                <h2 className="text-2xl font-bold text-text-primary">{name}</h2>
-                                {description && (
-                                  <p className="mt-2 text-text-secondary">{description}</p>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-
-                      {/* Agent grid */}
-                      <AgentGrid
-                        key={`grid-${nextCategory}`}
-                        category={nextCategory}
-                        searchQuery={searchQuery}
-                        onSelectAgent={handleAgentSelect}
-                        scrollElementRef={scrollContainerRef}
-                      />
-                    </div>
-                  )}
-
-                  {/* Note: Using Tailwind keyframes for slide in/out animations */}
-                </div>
-              </div>
-              {/* Agent detail dialog */}
-              {isDetailOpen && selectedAgent && (
-                <AgentDetail
-                  agent={selectedAgent}
-                  isOpen={isDetailOpen}
-                  onClose={handleDetailClose}
-                />
-              )}
+          {/* The compact header has no room for a visible title, but a landmark label is
+              not reachable by heading navigation: without this the document's outline
+              would start at an agent card. */}
+          <h1 id="marketplace-heading" className="sr-only">
+            {localize('com_agents_marketplace')}
+          </h1>
+          <div className="border-border-light shrink-0 border-b">
+            <div className="flex items-center gap-2 p-3">
+              {isSmallScreen && <OpenSidebar className="size-9 shrink-0 rounded-lg" />}
+              <SearchBar value={searchQuery} onSearch={handleSearch} className="min-w-0 flex-1" />
+              <MarketplaceAdminSettings />
             </div>
-          </main>
-        </SidePanelGroup>
-      </SidePanelProvider>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 pb-3">
+              <div className="min-w-0 flex-1 basis-full lg:basis-0">
+                <CategoryTabs
+                  categories={categoriesQuery.data || []}
+                  activeTab={activeCategory}
+                  isLoading={categoriesQuery.isLoading}
+                  onChange={handleTabChange}
+                />
+              </div>
+              <div className="ms-auto flex shrink-0 items-center gap-1.5">
+                <MineFilterToggle checked={mine === 1} onCheckedChange={handleMineChange} />
+                <SortDropdown value={sort} onChange={handleSortChange} />
+              </div>
+            </div>
+          </div>
+          <div
+            ref={scrollContainerRef}
+            className="min-h-0 flex-1 scrollbar-gutter-stable overflow-x-hidden overflow-y-auto p-3"
+          >
+            {/* Deliberately unkeyed: the grid's own `scopeKey` already carries the category,
+                so it replaces the results itself and hands focus back when the scope
+                changes. Remounting it on the category instead would destroy an open detail
+                dialog and its return target, and the replacement grid starts with an empty
+                `previousScopeKeyRef`, so it reads that render as a first mount and leaves
+                focus on the document. */}
+            <AgentGrid
+              category={activeCategory}
+              searchQuery={searchQuery}
+              scrollElementRef={scrollContainerRef}
+              sort={sort}
+              mine={mine}
+            />
+          </div>
+        </main>
+      </SidePanelGroup>
     </div>
   );
 };

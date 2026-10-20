@@ -71,16 +71,16 @@ function DynamicDropdown({
       )}
     >
       <HoverCard openDelay={300}>
-        <HoverCardTrigger className="grid w-full items-center gap-2">
+        <HoverCardTrigger className="grid h-full w-full content-between items-center gap-2">
           {showLabel === true && (
             <div className="flex w-full justify-between">
               <Label
                 htmlFor={`${settingKey}-dynamic-dropdown`}
-                className="text-left text-sm font-medium"
+                className="text-left text-xs font-medium"
               >
                 {labelCode ? (localize(label as TranslationKeys) ?? label) : label || settingKey}
                 {showDefault && (
-                  <small className="opacity-40">
+                  <small className="high-contrast:opacity-100 opacity-40">
                     ({localize('com_endpoint_default')}: {defaultValue})
                   </small>
                 )}
@@ -95,6 +95,7 @@ function DynamicDropdown({
             setValue={handleChange}
             availableValues={options}
             containerClassName="w-full"
+            className="py-1.5"
             id={`${settingKey}-dynamic-dropdown`}
             placeholder={
               placeholderCode

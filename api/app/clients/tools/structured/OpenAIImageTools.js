@@ -2,15 +2,18 @@ const axios = require('axios');
 const { v4 } = require('uuid');
 const OpenAI = require('openai');
 const FormData = require('form-data');
-const { ProxyAgent } = require('undici');
-const { tool } = require('@langchain/core/tools');
 const { logger } = require('@librechat/data-schemas');
-const { HttpsProxyAgent } = require('https-proxy-agent');
-const { logAxiosError, oaiToolkit } = require('@librechat/api');
+const { tool } = require('@librechat/agents/langchain/tools');
 const { ContentTypes, EImageOutputType } = require('librechat-data-provider');
+const {
+  logAxiosError,
+  oaiToolkit,
+  extractBaseURL,
+  getProxyDispatcher,
+  applyAxiosProxyConfig,
+} = require('@librechat/api');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
-const extractBaseURL = require('~/utils/extractBaseURL');
-const { getFiles } = require('~/models/File');
+const { getFiles } = require('~/models');
 
 const displayMessage =
   "The tool displayed an image. All generated images are already plainly visible, so don't repeat the descriptions in detail. Do not list download links as they are available in the UI already. The user may download the images by clicking on them, but do not mention anything about downloading to the user.";
@@ -79,6 +82,8 @@ function createOpenAIImageTools(fields = {}) {
   let apiKey = fields.IMAGE_GEN_OAI_API_KEY ?? getApiKey();
   const closureConfig = { apiKey };
 
+  const imageModel = process.env.IMAGE_GEN_OAI_MODEL || 'gpt-image-2.5-flare';
+
   let baseURL = 'https://api.openai.com/v1/';
   if (!override && process.env.IMAGE_GEN_OAI_BASEURL) {
     baseURL = extractBaseURL(process.env.IMAGE_GEN_OAI_BASEURL);
@@ -122,10 +127,10 @@ function createOpenAIImageTools(fields = {}) {
         throw new Error('Missing required field: prompt');
       }
       const clientConfig = { ...closureConfig };
-      if (process.env.PROXY) {
-        const proxyAgent = new ProxyAgent(process.env.PROXY);
+      const proxyDispatcher = getProxyDispatcher();
+      if (proxyDispatcher) {
         clientConfig.fetchOptions = {
-          dispatcher: proxyAgent,
+          dispatcher: proxyDispatcher,
         };
       }
 
@@ -158,7 +163,7 @@ function createOpenAIImageTools(fields = {}) {
 
         resp = await openai.images.generate(
           {
-            model: 'gpt-image-1',
+            model: imageModel,
             prompt: replaceUnwantedChars(prompt),
             n: Math.min(Math.max(1, n), 10),
             background,
@@ -232,15 +237,15 @@ Error Message: ${error.message}`);
       }
 
       const clientConfig = { ...closureConfig };
-      if (process.env.PROXY) {
-        const proxyAgent = new ProxyAgent(process.env.PROXY);
+      const proxyDispatcher = getProxyDispatcher();
+      if (proxyDispatcher) {
         clientConfig.fetchOptions = {
-          dispatcher: proxyAgent,
+          dispatcher: proxyDispatcher,
         };
       }
 
       const formData = new FormData();
-      formData.append('model', 'gpt-image-1');
+      formData.append('model', imageModel);
       formData.append('prompt', replaceUnwantedChars(prompt));
       // TODO: `mask` support
       // TODO: more than 1 image support
@@ -348,9 +353,7 @@ Error Message: ${error.message}`);
           baseURL,
         };
 
-        if (process.env.PROXY) {
-          axiosConfig.httpsAgent = new HttpsProxyAgent(process.env.PROXY);
-        }
+        applyAxiosProxyConfig(axiosConfig, baseURL);
 
         if (process.env.IMAGE_GEN_OAI_AZURE_API_VERSION && process.env.IMAGE_GEN_OAI_BASEURL) {
           axiosConfig.params = {

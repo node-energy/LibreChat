@@ -1,6 +1,7 @@
 import React from 'react';
+import { JSX } from 'react/jsx-runtime';
 
-export default function ConvoIcon() {
+export default function ConvoIcon(): JSX.Element {
   return (
     <svg
       data-testid="convo-icon"
@@ -14,6 +15,7 @@ export default function ConvoIcon() {
       height="1em"
       width="1em"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
     </svg>

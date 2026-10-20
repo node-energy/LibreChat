@@ -1,6 +1,7 @@
 import React from 'react';
+import { JSX } from 'react/jsx-runtime';
 
-export default function ChatIcon() {
+export default function ChatIcon(): JSX.Element {
   return (
     <svg
       stroke="currentColor"
@@ -13,6 +14,7 @@ export default function ChatIcon() {
       height="1em"
       width="1em"
       xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
     >
       <path
         strokeLinecap="round"

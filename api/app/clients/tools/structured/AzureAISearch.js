@@ -1,13 +1,42 @@
-const { z } = require('zod');
-const { Tool } = require('@langchain/core/tools');
 const { logger } = require('@librechat/data-schemas');
+const { Tool } = require('@librechat/agents/langchain/tools');
 const { SearchClient, AzureKeyCredential } = require('@azure/search-documents');
+
+const azureSearchHostSuffixes = ['.search.windows.net', '.search.azure.us', '.search.azure.cn'];
+
+const isAzureSearchEndpoint = (endpoint) => {
+  try {
+    const parsed = new URL(endpoint);
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+    return (
+      parsed.protocol === 'https:' &&
+      azureSearchHostSuffixes.some((suffix) => hostname.endsWith(suffix))
+    );
+  } catch {
+    return false;
+  }
+};
+
+const azureAISearchJsonSchema = {
+  type: 'object',
+  properties: {
+    query: {
+      type: 'string',
+      description: 'Search word or phrase to Azure AI Search',
+    },
+  },
+  required: ['query'],
+};
 
 class AzureAISearch extends Tool {
   // Constants for default values
   static DEFAULT_API_VERSION = '2023-11-01';
   static DEFAULT_QUERY_TYPE = 'simple';
   static DEFAULT_TOP = 5;
+
+  static get jsonSchema() {
+    return azureAISearchJsonSchema;
+  }
 
   // Helper function for initializing properties
   _initializeField(field, envVar, defaultValue) {
@@ -22,16 +51,15 @@ class AzureAISearch extends Tool {
     /* Used to initialize the Tool without necessary variables. */
     this.override = fields.override ?? false;
 
-    // Define schema
-    this.schema = z.object({
-      query: z.string().describe('Search word or phrase to Azure AI Search'),
-    });
+    this.schema = azureAISearchJsonSchema;
 
     // Initialize properties using helper function
     this.serviceEndpoint = this._initializeField(
       fields.AZURE_AI_SEARCH_SERVICE_ENDPOINT,
       'AZURE_AI_SEARCH_SERVICE_ENDPOINT',
     );
+    this.isUserProvidedEndpoint =
+      fields.userProvidedAuthFields?.has('AZURE_AI_SEARCH_SERVICE_ENDPOINT') === true;
     this.indexName = this._initializeField(
       fields.AZURE_AI_SEARCH_INDEX_NAME,
       'AZURE_AI_SEARCH_INDEX_NAME',
@@ -61,6 +89,12 @@ class AzureAISearch extends Tool {
     if (!this.override && (!this.serviceEndpoint || !this.indexName || !this.apiKey)) {
       throw new Error(
         'Missing AZURE_AI_SEARCH_SERVICE_ENDPOINT, AZURE_AI_SEARCH_INDEX_NAME, or AZURE_AI_SEARCH_API_KEY environment variable.',
+      );
+    }
+
+    if (this.isUserProvidedEndpoint && !isAzureSearchEndpoint(this.serviceEndpoint)) {
+      throw new Error(
+        'User-provided Azure AI Search endpoints must use a trusted Azure Search host.',
       );
     }
 

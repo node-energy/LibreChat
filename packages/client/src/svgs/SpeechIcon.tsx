@@ -1,10 +1,11 @@
+import { JSX } from 'react/jsx-runtime';
 import { cn } from '~/utils/';
 
 type SpeechIconProps = {
   className?: string;
 };
 
-export default function SpeechIcon({ className }: SpeechIconProps) {
+export default function SpeechIcon({ className }: SpeechIconProps): JSX.Element {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -17,6 +18,7 @@ export default function SpeechIcon({ className }: SpeechIconProps) {
       strokeLinecap="round"
       strokeLinejoin="round"
       className={cn(className)}
+      aria-hidden="true"
     >
       <path d="M2 10v3" />
       <path d="M6 6v11" />

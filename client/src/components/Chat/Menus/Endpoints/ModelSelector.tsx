@@ -1,20 +1,27 @@
 import React, { useMemo } from 'react';
+import { TooltipAnchor } from '@librechat/client';
+import { getConfigDefaults } from 'librechat-data-provider';
 import type { ModelSelectorProps } from '~/common';
-import { ModelSelectorProvider, useModelSelectorContext } from './ModelSelectorContext';
-import { ModelSelectorChatProvider } from './ModelSelectorChatContext';
 import {
   renderModelSpecs,
   renderEndpoints,
   renderSearchResults,
   renderCustomGroups,
 } from './components';
+import { ModelSelectorProvider, useModelSelectorContext } from './ModelSelectorContext';
+import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
+import { ModelSelectorChatProvider } from './ModelSelectorChatContext';
 import { getSelectedIcon, getDisplayValue } from './utils';
 import { CustomMenu as Menu } from './CustomMenu';
 import DialogManager from './DialogManager';
 import { useLocalize } from '~/hooks';
 
+const defaultInterface = getConfigDefaults().interface;
+
 function ModelSelectorContent() {
   const localize = useLocalize();
+  const modelSelectorHint = useShortcutHint('openModelSelector', localize('com_ui_select_model'));
+  const modelSelectorAriaKey = useShortcutAriaKey('openModelSelector');
 
   const {
     // LibreChat
@@ -26,7 +33,6 @@ function ModelSelectorContent() {
     searchValue,
     searchResults,
     selectedValues,
-
     // Functions
     setSearchValue,
     setSelectedValues,
@@ -43,8 +49,9 @@ function ModelSelectorContent() {
         selectedValues,
         modelSpecs,
         endpointsConfig,
+        agentsMap,
       }),
-    [mappedEndpoints, selectedValues, modelSpecs, endpointsConfig],
+    [mappedEndpoints, selectedValues, modelSpecs, endpointsConfig, agentsMap],
   );
   const selectedDisplayValue = useMemo(
     () =>
@@ -59,21 +66,29 @@ function ModelSelectorContent() {
   );
 
   const trigger = (
-    <button
-      className="my-1 flex h-10 w-full max-w-[70vw] items-center justify-center gap-2 rounded-xl border border-border-light bg-surface-secondary px-3 py-2 text-sm text-text-primary hover:bg-surface-tertiary"
+    <TooltipAnchor
       aria-label={localize('com_ui_select_model')}
-    >
-      {selectedIcon && React.isValidElement(selectedIcon) && (
-        <div className="flex flex-shrink-0 items-center justify-center overflow-hidden">
-          {selectedIcon}
-        </div>
-      )}
-      <span className="flex-grow truncate text-left">{selectedDisplayValue}</span>
-    </button>
+      description={modelSelectorHint}
+      render={
+        <button
+          data-testid="model-selector-button"
+          aria-keyshortcuts={modelSelectorAriaKey}
+          className="border-border-chrome bg-presentation text-text-primary hover:bg-surface-active-alt rounded-theme-control my-1 flex h-9 max-w-full items-center gap-2 border px-3 py-2 text-sm"
+          aria-label={localize('com_ui_select_model')}
+        >
+          {selectedIcon && React.isValidElement(selectedIcon) && (
+            <div className="flex shrink-0 items-center justify-center overflow-hidden">
+              {selectedIcon}
+            </div>
+          )}
+          <span className="truncate text-left">{selectedDisplayValue}</span>
+        </button>
+      }
+    />
   );
 
   return (
-    <div className="relative flex w-full max-w-md flex-col items-center gap-2">
+    <div className="relative flex max-w-[60vw] min-w-0 flex-col items-center gap-2 sm:max-w-xs">
       <Menu
         values={selectedValues}
         onValuesChange={(values: Record<string, any>) => {
@@ -84,7 +99,8 @@ function ModelSelectorContent() {
           });
         }}
         onSearch={(value) => setSearchValue(value)}
-        combobox={<input placeholder={localize('com_endpoint_search_models')} />}
+        combobox={<input id="model-search" placeholder=" " />}
+        comboboxLabel={localize('com_endpoint_search_models')}
         trigger={trigger}
       >
         {searchResults ? (
@@ -114,6 +130,14 @@ function ModelSelectorContent() {
 }
 
 export default function ModelSelector({ startupConfig }: ModelSelectorProps) {
+  const interfaceConfig = startupConfig?.interface ?? defaultInterface;
+  const modelSpecs = startupConfig?.modelSpecs?.list ?? [];
+
+  // Hide the selector when modelSelect is false and there are no model specs to show
+  if (interfaceConfig.modelSelect === false && modelSpecs.length === 0) {
+    return null;
+  }
+
   return (
     <ModelSelectorChatProvider>
       <ModelSelectorProvider startupConfig={startupConfig}>

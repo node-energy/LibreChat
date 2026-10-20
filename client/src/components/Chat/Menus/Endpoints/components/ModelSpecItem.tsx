@@ -1,25 +1,48 @@
 import React from 'react';
+import { Pin, PinOff } from 'lucide';
+import { CheckCircle2 } from 'lucide-react';
+import { MorphIcon } from '@librechat/client';
+import { VisuallyHidden } from '@ariakit/react';
 import type { TModelSpec } from 'librechat-data-provider';
-import { CustomMenuItem as MenuItem } from '../CustomMenu';
+import { useFavorites, useLocalize, useIsActiveItem } from '~/hooks';
 import { useModelSelectorContext } from '../ModelSelectorContext';
+import { CustomMenuItem as MenuItem } from '../CustomMenu';
+import { cn, getSpecAgentAvatarURL } from '~/utils';
+import SpecDescription from './SpecDescription';
 import SpecIcon from './SpecIcon';
-import { cn } from '~/utils';
 
 interface ModelSpecItemProps {
   spec: TModelSpec;
   isSelected: boolean;
+  /** Set when the sibling model list is virtualized; see `VirtualizedModelList`. */
+  posInSet?: number;
+  setSize?: number;
 }
 
-export function ModelSpecItem({ spec, isSelected }: ModelSpecItemProps) {
-  const { handleSelectSpec, endpointsConfig } = useModelSelectorContext();
+export function ModelSpecItem({ spec, isSelected, posInSet, setSize }: ModelSpecItemProps) {
+  const localize = useLocalize();
+  const { handleSelectSpec, endpointsConfig, agentsMap } = useModelSelectorContext();
+  const { isFavoriteSpec, toggleFavoriteSpec } = useFavorites();
   const { showIconInMenu = true } = spec;
+  const agentAvatarURL = getSpecAgentAvatarURL(spec, agentsMap);
+
+  const { ref: itemRef, isActive } = useIsActiveItem<HTMLDivElement>();
+
+  const isFavorite = isFavoriteSpec(spec.name);
+
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    toggleFavoriteSpec(spec.name);
+  };
+
   return (
     <MenuItem
-      key={spec.name}
+      ref={itemRef}
       onClick={() => handleSelectSpec(spec)}
-      className={cn(
-        'flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm',
-      )}
+      aria-selected={isSelected || undefined}
+      aria-posinset={posInSet}
+      aria-setsize={setSize}
+      className="group flex w-full cursor-pointer items-center justify-between rounded-lg px-2 text-sm"
     >
       <div
         className={cn(
@@ -28,35 +51,47 @@ export function ModelSpecItem({ spec, isSelected }: ModelSpecItemProps) {
         )}
       >
         {showIconInMenu && (
-          <div className="flex-shrink-0">
-            <SpecIcon currentSpec={spec} endpointsConfig={endpointsConfig} />
+          <div className="shrink-0">
+            <SpecIcon
+              currentSpec={spec}
+              endpointsConfig={endpointsConfig}
+              agentAvatarURL={agentAvatarURL}
+            />
           </div>
         )}
         <div className="flex min-w-0 flex-col gap-1">
           <span className="truncate text-left">{spec.label}</span>
-          {spec.description && (
-            <span className="break-words text-xs font-normal">{spec.description}</span>
-          )}
+          <SpecDescription description={spec.description} />
         </div>
       </div>
+      <button
+        type="button"
+        tabIndex={isActive ? 0 : -1}
+        onClick={handleFavoriteClick}
+        aria-label={isFavorite ? localize('com_ui_unpin') : localize('com_ui_pin')}
+        className={cn(
+          'hover:bg-surface-hover focus-visible:ring-ring-primary text-text-secondary rounded-md p-1 focus-visible:ring-2 focus-visible:outline-hidden focus-visible:ring-inset',
+          isFavorite
+            ? 'visible'
+            : // Visible by default so it's tappable on touch (no hover to
+              // reveal it); only hidden-until-hover where no pointer is coarse,
+              // so a 2-in-1's touchscreen keeps it beside its hovering trackpad.
+              // A hover-gated child would otherwise make the whole item
+              // hover-dependent, so the first tap only reveals it and a second
+              // tap is needed to select (the iOS double-tap).
+              'no-touch:invisible group-focus-within:visible group-hover:visible group-data-[active-item]:visible',
+        )}
+      >
+        <MorphIcon icon={isFavorite ? PinOff : Pin} className="h-4 w-4" />
+      </button>
       {isSelected && (
-        <div className="flex-shrink-0 self-center">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="block"
-          >
-            <path
-              fillRule="evenodd"
-              clipRule="evenodd"
-              d="M2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12ZM16.0755 7.93219C16.5272 8.25003 16.6356 8.87383 16.3178 9.32549L11.5678 16.0755C11.3931 16.3237 11.1152 16.4792 10.8123 16.4981C10.5093 16.517 10.2142 16.3973 10.0101 16.1727L7.51006 13.4227C7.13855 13.014 7.16867 12.3816 7.57733 12.0101C7.98598 11.6386 8.61843 11.6687 8.98994 12.0773L10.6504 13.9039L14.6822 8.17451C15 7.72284 15.6238 7.61436 16.0755 7.93219Z"
-              fill="currentColor"
-            />
-          </svg>
-        </div>
+        <>
+          <CheckCircle2
+            className="text-text-primary size-4 shrink-0 self-center"
+            aria-hidden="true"
+          />
+          <VisuallyHidden>{localize('com_a11y_selected')}</VisuallyHidden>
+        </>
       )}
     </MenuItem>
   );

@@ -1,14 +1,19 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { getAgentAvatarUrl, renderAgentAvatar, getContactDisplayName } from '../agents';
 import type t from 'librechat-data-provider';
+import { getAgentAvatarUrl, renderAgentAvatar } from '../agents';
 
-// Mock the Bot icon from lucide-react
+// Mock the Feather icon from lucide-react
 jest.mock('lucide-react', () => ({
-  Bot: ({ className, strokeWidth, ...props }: any) => (
-    <svg data-testid="bot-icon" className={className} data-stroke-width={strokeWidth} {...props}>
-      <title>{/* eslint-disable-line i18next/no-literal-string */}Bot Icon</title>
+  Feather: ({ className, strokeWidth, ...props }: any) => (
+    <svg
+      data-testid="feather-icon"
+      className={className}
+      data-stroke-width={strokeWidth}
+      {...props}
+    >
+      <title>{/* eslint-disable-line i18next/no-literal-string */}Feather Icon</title>
     </svg>
   ),
 }));
@@ -72,7 +77,7 @@ describe('Agent Utilities', () => {
       expect(img).toHaveClass('rounded-full', 'object-cover', 'shadow-lg');
     });
 
-    it('should render Bot icon fallback when no avatar', () => {
+    it('should render Feather icon fallback when no avatar', () => {
       const agent = {
         id: '1',
         name: 'Test Agent',
@@ -80,9 +85,9 @@ describe('Agent Utilities', () => {
 
       render(<div>{renderAgentAvatar(agent)}</div>);
 
-      const botIcon = screen.getByTestId('bot-icon');
-      expect(botIcon).toBeInTheDocument();
-      expect(botIcon).toHaveAttribute('data-stroke-width', '1.5');
+      const featherIcon = screen.getByTestId('feather-icon');
+      expect(featherIcon).toBeInTheDocument();
+      expect(featherIcon).toHaveAttribute('data-stroke-width', '1.5');
     });
 
     it('should apply different size classes', () => {
@@ -113,64 +118,6 @@ describe('Agent Utilities', () => {
 
       const container = screen.getByAltText('Test Agent avatar').parentElement;
       expect(container).toHaveClass('custom-class');
-    });
-
-    it('should handle showBorder option', () => {
-      const agent = {
-        id: '1',
-        name: 'Test Agent',
-        avatar: '/test-avatar.png',
-      } as unknown as t.Agent;
-
-      const { rerender } = render(<div>{renderAgentAvatar(agent, { showBorder: true })}</div>);
-      expect(screen.getByAltText('Test Agent avatar')).toHaveClass('border-1');
-
-      rerender(<div>{renderAgentAvatar(agent, { showBorder: false })}</div>);
-      expect(screen.getByAltText('Test Agent avatar')).not.toHaveClass('border-1');
-    });
-  });
-
-  describe('getContactDisplayName', () => {
-    it('should return null for null agent', () => {
-      expect(getContactDisplayName(null)).toBeNull();
-    });
-
-    it('should return null for undefined agent', () => {
-      expect(getContactDisplayName(undefined)).toBeNull();
-    });
-
-    it('should prioritize support_contact name', () => {
-      const agent = {
-        id: '1',
-        support_contact: { name: 'Support Team', email: 'support@example.com' },
-        authorName: 'John Doe',
-      } as any;
-      expect(getContactDisplayName(agent)).toBe('Support Team');
-    });
-
-    it('should use authorName when support_contact name is missing', () => {
-      const agent = {
-        id: '1',
-        support_contact: { email: 'support@example.com' },
-        authorName: 'John Doe',
-      } as any;
-      expect(getContactDisplayName(agent)).toBe('John Doe');
-    });
-
-    it('should use support_contact email when both name and authorName are missing', () => {
-      const agent = {
-        id: '1',
-        support_contact: { email: 'support@example.com' },
-      } as any;
-      expect(getContactDisplayName(agent)).toBe('support@example.com');
-    });
-
-    it('should return null when no contact info is available', () => {
-      const agent = {
-        id: '1',
-        name: 'Test Agent',
-      } as any;
-      expect(getContactDisplayName(agent)).toBeNull();
     });
   });
 

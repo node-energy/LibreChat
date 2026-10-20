@@ -1,4 +1,5 @@
 import React from 'react';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { FileSources } from 'librechat-data-provider';
@@ -21,6 +22,7 @@ jest.mock('~/utils', () => ({
   logger: {
     log: jest.fn(),
   },
+  getCachedPreview: jest.fn(() => undefined),
 }));
 
 jest.mock('../Image', () => {
@@ -36,10 +38,20 @@ jest.mock('../Image', () => {
 });
 
 jest.mock('../FileContainer', () => {
-  return function MockFileContainer({ file }: any) {
+  return function MockFileContainer({ file, onClick, ariaLabel, subtitleAction }: any) {
     return (
       <div data-testid="mock-file-container">
         <span data-testid="file-name">{file.filename}</span>
+        {onClick != null && (
+          <button type="button" aria-label={ariaLabel} onClick={onClick}>
+            {file.filename}
+          </button>
+        )}
+        {subtitleAction != null && (
+          <button type="button" aria-label={subtitleAction.label} onClick={subtitleAction.onClick}>
+            {subtitleAction.label}
+          </button>
+        )}
       </div>
     );
   };
@@ -94,8 +106,29 @@ describe('FileRow', () => {
     );
   };
 
+  it('passes the composer pane index to file deletion', () => {
+    const file = createMockFile();
+    const filesMap = new Map<string, ExtendedFile>();
+    filesMap.set(file.file_id, file);
+
+    render(
+      <FileRow
+        files={filesMap}
+        setFiles={mockSetFiles}
+        setFilesLoading={mockSetFilesLoading}
+        index={1}
+      />,
+    );
+
+    expect(mockUseFileDeletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        index: 1,
+      }),
+    );
+  });
+
   describe('Image URL Selection Logic', () => {
-    it('should use filepath instead of preview when progress is 1 (upload complete)', () => {
+    it('should prefer cached preview over filepath when upload is complete', () => {
       const file = createMockFile({
         file_id: 'uploaded-file',
         preview: 'blob:http://localhost:3080/temp-preview',
@@ -109,8 +142,7 @@ describe('FileRow', () => {
       renderFileRow(filesMap);
 
       const imageUrl = screen.getByTestId('image-url').textContent;
-      expect(imageUrl).toBe('/images/user123/uploaded-file__image.png');
-      expect(imageUrl).not.toContain('blob:');
+      expect(imageUrl).toBe('blob:http://localhost:3080/temp-preview');
     });
 
     it('should use preview when progress is less than 1 (uploading)', () => {
@@ -147,7 +179,7 @@ describe('FileRow', () => {
       expect(imageUrl).toBe('/images/user123/file-without-preview__image.png');
     });
 
-    it('should use filepath when both preview and filepath exist and progress is exactly 1', () => {
+    it('should prefer preview over filepath when both exist and progress is 1', () => {
       const file = createMockFile({
         file_id: 'complete-file',
         preview: 'blob:http://localhost:3080/old-blob',
@@ -161,7 +193,7 @@ describe('FileRow', () => {
       renderFileRow(filesMap);
 
       const imageUrl = screen.getByTestId('image-url').textContent;
-      expect(imageUrl).toBe('/images/user123/complete-file__image.png');
+      expect(imageUrl).toBe('blob:http://localhost:3080/old-blob');
     });
   });
 
@@ -284,7 +316,7 @@ describe('FileRow', () => {
 
       const urls = screen.getAllByTestId('image-url').map((el) => el.textContent);
       expect(urls).toContain('blob:http://localhost:3080/preview-1');
-      expect(urls).toContain('/images/user123/file-2__image.png');
+      expect(urls).toContain('blob:http://localhost:3080/preview-2');
     });
 
     it('should deduplicate files with the same file_id', () => {
@@ -321,10 +353,10 @@ describe('FileRow', () => {
     });
   });
 
-  describe('Regression: Blob URL Bug Fix', () => {
-    it('should NOT use revoked blob URL after upload completes', () => {
+  describe('Preview Cache Integration', () => {
+    it('should prefer preview blob URL over filepath for zero-flicker rendering', () => {
       const file = createMockFile({
-        file_id: 'regression-test',
+        file_id: 'cache-test',
         preview: 'blob:http://localhost:3080/d25f730c-152d-41f7-8d79-c9fa448f606b',
         filepath:
           '/images/68c98b26901ebe2d87c193a2/c0fe1b93-ba3d-456c-80be-9a492bfd9ed0__image.png',
@@ -337,11 +369,173 @@ describe('FileRow', () => {
       renderFileRow(filesMap);
 
       const imageUrl = screen.getByTestId('image-url').textContent;
+      expect(imageUrl).toBe('blob:http://localhost:3080/d25f730c-152d-41f7-8d79-c9fa448f606b');
+    });
 
-      expect(imageUrl).not.toContain('blob:');
+    it('should fall back to filepath when no preview exists', () => {
+      const file = createMockFile({
+        file_id: 'no-preview',
+        preview: undefined,
+        filepath:
+          '/images/68c98b26901ebe2d87c193a2/c0fe1b93-ba3d-456c-80be-9a492bfd9ed0__image.png',
+        progress: 1,
+      });
+
+      const filesMap = new Map<string, ExtendedFile>();
+      filesMap.set(file.file_id, file);
+
+      renderFileRow(filesMap);
+
+      const imageUrl = screen.getByTestId('image-url').textContent;
       expect(imageUrl).toBe(
         '/images/68c98b26901ebe2d87c193a2/c0fe1b93-ba3d-456c-80be-9a492bfd9ed0__image.png',
       );
+    });
+  });
+  describe('Pasted-text editing', () => {
+    const pastedFile = (overrides: Partial<ExtendedFile> = {}) =>
+      createMockFile({
+        file_id: 'pasted-file',
+        type: 'text/plain',
+        filename: 'pasted-text.txt',
+        preview: undefined,
+        filepath: '/uploads/user123/pasted-text.txt',
+        ...overrides,
+      });
+
+    const renderWithEditor = (
+      file: ExtendedFile,
+      {
+        isPaste = true,
+        actionPending = false,
+        onEditPastedText,
+        onMovePastedTextInline,
+      }: {
+        /** Stands in for the provenance registry the composer passes down. */
+        isPaste?: boolean;
+        /** Stands in for the in-flight action lock the composer passes down. */
+        actionPending?: boolean;
+        onEditPastedText?: (f: ExtendedFile) => void;
+        onMovePastedTextInline?: (f: ExtendedFile) => void;
+      } = {},
+    ) => {
+      const filesMap = new Map<string, ExtendedFile>();
+      filesMap.set(file.file_id, file);
+      return render(
+        <FileRow
+          files={filesMap}
+          setFiles={mockSetFiles}
+          setFilesLoading={mockSetFilesLoading}
+          isPastedTextFile={() => isPaste}
+          isPasteActionPending={() => actionPending}
+          onEditPastedText={onEditPastedText}
+          onMovePastedTextInline={onMovePastedTextInline}
+        />,
+      );
+    };
+
+    it('opens the editor with the chip that was clicked', async () => {
+      const onEditPastedText = jest.fn();
+      const file = pastedFile();
+      renderWithEditor(file, { onEditPastedText });
+
+      await userEvent.click(screen.getByRole('button', { name: 'com_ui_pasted_text_edit_chip' }));
+
+      expect(onEditPastedText).toHaveBeenCalledWith(file);
+    });
+
+    it('names the action rather than just the file for screen readers', () => {
+      renderWithEditor(pastedFile(), { onEditPastedText: jest.fn() });
+
+      expect(screen.getByRole('button').getAttribute('aria-label')).toBe(
+        'com_ui_pasted_text_edit_chip',
+      );
+    });
+
+    it('numbered pastes are editable too', () => {
+      renderWithEditor(pastedFile({ filename: 'pasted-text-2.txt' }), {
+        onEditPastedText: jest.fn(),
+      });
+
+      expect(screen.getByRole('button')).toBeInTheDocument();
+    });
+
+    it('leaves a deliberate text upload inert', () => {
+      renderWithEditor(pastedFile({ filename: 'notes.txt' }), { isPaste: false });
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('leaves a deliberate upload named like a paste inert', () => {
+      renderWithEditor(pastedFile(), { isPaste: false });
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('waits for the upload to finish before offering the editor', () => {
+      renderWithEditor(pastedFile({ progress: 0.4 }), { onEditPastedText: jest.fn() });
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('stays inert where no editor is wired up', () => {
+      renderWithEditor(pastedFile());
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('stays inert where no provenance predicate is wired up', () => {
+      const filesMap = new Map<string, ExtendedFile>();
+      filesMap.set('pasted-file', pastedFile());
+      render(
+        <FileRow
+          files={filesMap}
+          setFiles={mockSetFiles}
+          setFilesLoading={mockSetFilesLoading}
+          onEditPastedText={jest.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('offers returning the paste to the composer from the chip subtitle', async () => {
+      const onMovePastedTextInline = jest.fn();
+      const file = pastedFile();
+      renderWithEditor(file, { onEditPastedText: jest.fn(), onMovePastedTextInline });
+
+      await userEvent.click(screen.getByRole('button', { name: 'com_ui_pasted_text_move_inline' }));
+
+      expect(onMovePastedTextInline).toHaveBeenCalledWith(file);
+    });
+
+    it('offers no subtitle action for a deliberate text upload', () => {
+      renderWithEditor(pastedFile({ filename: 'notes.txt' }), {
+        isPaste: false,
+        onMovePastedTextInline: jest.fn(),
+      });
+
+      expect(
+        screen.queryByRole('button', { name: 'com_ui_pasted_text_move_inline' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('hides the paste actions while an action is in flight for the chip', () => {
+      renderWithEditor(pastedFile(), {
+        actionPending: true,
+        onEditPastedText: jest.fn(),
+        onMovePastedTextInline: jest.fn(),
+      });
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('offers no subtitle action where no handler is wired up', () => {
+      renderWithEditor(pastedFile());
+
+      expect(
+        screen.queryByRole('button', { name: 'com_ui_pasted_text_move_inline' }),
+      ).not.toBeInTheDocument();
     });
   });
 });

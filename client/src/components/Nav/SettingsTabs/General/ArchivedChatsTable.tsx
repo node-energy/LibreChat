@@ -1,53 +1,62 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import debounce from 'lodash/debounce';
+import { useState, useCallback, useMemo } from 'react';
+import { Trans } from 'react-i18next';
 import { useRecoilValue } from 'recoil';
-import { TrashIcon, ArchiveRestore, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { TrashIcon, ExternalLink, ArchiveRestore } from 'lucide-react';
 import {
   Button,
-  OGDialog,
-  OGDialogContent,
-  OGDialogHeader,
-  OGDialogTitle,
-  Label,
-  TooltipAnchor,
   Spinner,
-  DataTable,
-  useToastContext,
+  OGDialog,
+  TooltipAnchor,
   useMediaQuery,
+  OGDialogTitle,
+  OGDialogHeader,
+  useToastContext,
+  OGDialogContent,
+  VirtualizedDataTable,
 } from '@librechat/client';
 import type { ConversationListParams, TConversation } from 'librechat-data-provider';
+import type { SortingState, Updater } from '@tanstack/react-table';
+import type { TableColumn } from '@librechat/client';
 import {
-  useArchiveConvoMutation,
   useConversationsInfiniteQuery,
   useDeleteConversationMutation,
+  useArchiveConvoMutation,
 } from '~/data-provider';
 import { MinimalIcon } from '~/components/Endpoints';
 import { NotificationSeverity } from '~/common';
+import { formatDate, logger } from '~/utils';
 import { useLocalize } from '~/hooks';
-import { formatDate } from '~/utils';
 import store from '~/store';
 
 const DEFAULT_PARAMS: ConversationListParams = {
   isArchived: true,
-  sortBy: 'createdAt',
+  sortBy: 'archivedAt',
   sortDirection: 'desc',
   search: '',
 };
 
-export default function ArchivedChatsTable({
-  onOpenChange,
-}: {
-  onOpenChange: (isOpen: boolean) => void;
-}) {
+const SORTABLE_COLUMNS = new Set<ConversationListParams['sortBy']>(['title', 'archivedAt']);
+
+/**
+ * Chats archived before `archivedAt` was recorded have none, so they keep showing the
+ * date this column has always shown for them rather than going blank.
+ */
+const getArchivedDate = (conversation: TConversation): string =>
+  conversation.archivedAt?.toString() ?? conversation.createdAt?.toString() ?? '';
+
+type ArchivedConversationRow = TConversation & Record<string, unknown>;
+
+export default function ArchivedChatsTable() {
   const localize = useLocalize();
-  const isSmallScreen = useMediaQuery('(max-width: 768px)');
   const { showToast } = useToastContext();
-  const isSearchEnabled = useRecoilValue(store.search);
+  const searchState = useRecoilValue(store.search);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const isSmallScreen = useMediaQuery('(max-width: 768px)');
   const [queryParams, setQueryParams] = useState<ConversationListParams>(DEFAULT_PARAMS);
   const [deleteConversation, setDeleteConversation] = useState<TConversation | null>(null);
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isLoading } =
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, refetch, isLoading, isFetching } =
     useConversationsInfiniteQuery(queryParams, {
       staleTime: 0,
       cacheTime: 5 * 60 * 1000,
@@ -55,39 +64,61 @@ export default function ArchivedChatsTable({
       refetchOnMount: false,
     });
 
-  const handleSort = useCallback((sortField: string, sortOrder: 'asc' | 'desc') => {
-    setQueryParams((prev) => ({
-      ...prev,
-      sortBy: sortField as 'title' | 'createdAt',
-      sortDirection: sortOrder,
-    }));
-  }, []);
-
   const handleFilterChange = useCallback((value: string) => {
-    const encodedValue = encodeURIComponent(value.trim());
     setQueryParams((prev) => ({
       ...prev,
-      search: encodedValue,
+      search: value.trim(),
     }));
   }, []);
 
-  const debouncedFilterChange = useMemo(
-    () => debounce(handleFilterChange, 300),
-    [handleFilterChange],
+  const getRowId = useCallback(
+    (row: ArchivedConversationRow, index: number) => row.conversationId ?? `archived-${index}`,
+    [],
   );
 
-  useEffect(() => {
-    return () => {
-      debouncedFilterChange.cancel();
-    };
-  }, [debouncedFilterChange]);
-
-  const allConversations = useMemo(() => {
+  const allConversations = useMemo<ArchivedConversationRow[]>(() => {
     if (!data?.pages) {
       return [];
     }
-    return data.pages.flatMap((page) => page?.conversations?.filter(Boolean) ?? []);
+    return data.pages
+      .flatMap((page) => page?.conversations?.filter(Boolean) ?? [])
+      .map((conversation) => ({ ...conversation }));
   }, [data?.pages]);
+
+  const sorting = useMemo<SortingState>(
+    () => [
+      {
+        id: queryParams.sortBy ?? 'archivedAt',
+        desc: queryParams.sortDirection === 'desc',
+      },
+    ],
+    [queryParams.sortBy, queryParams.sortDirection],
+  );
+
+  const handleSortingChange = useCallback((updater: Updater<SortingState>) => {
+    setQueryParams((prev) => {
+      const currentSorting: SortingState = [
+        { id: prev.sortBy ?? 'archivedAt', desc: prev.sortDirection === 'desc' },
+      ];
+      const nextSorting = typeof updater === 'function' ? updater(currentSorting) : updater;
+      const nextSort = nextSorting[0];
+      const nextSortBy = nextSort?.id as ConversationListParams['sortBy'];
+
+      if (!SORTABLE_COLUMNS.has(nextSortBy)) {
+        return {
+          ...prev,
+          sortBy: 'archivedAt',
+          sortDirection: 'desc',
+        };
+      }
+
+      return {
+        ...prev,
+        sortBy: nextSortBy,
+        sortDirection: nextSort.desc ? 'desc' : 'asc',
+      };
+    });
+  }, []);
 
   const deleteMutation = useDeleteConversationMutation({
     onSuccess: async () => {
@@ -100,6 +131,7 @@ export default function ArchivedChatsTable({
       });
     },
     onError: (error: unknown) => {
+      logger.error('Error deleting archived conversation:', error);
       showToast({
         message: localize('com_ui_archive_delete_error') as string,
         severity: NotificationSeverity.ERROR,
@@ -107,11 +139,12 @@ export default function ArchivedChatsTable({
     },
   });
 
-  const unarchiveMutation = useArchiveConvoMutation({
+  const { mutate: unarchiveConversation, isLoading: isUnarchiving } = useArchiveConvoMutation({
     onSuccess: async () => {
       await refetch();
     },
     onError: (error: unknown) => {
+      logger.error('Error unarchiving conversation', error);
       showToast({
         message: localize('com_ui_unarchive_error') as string,
         severity: NotificationSeverity.ERROR,
@@ -126,130 +159,94 @@ export default function ArchivedChatsTable({
     await fetchNextPage();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-  const columns = useMemo(
+  const columns = useMemo<TableColumn<ArchivedConversationRow, unknown>[]>(
     () => [
       {
         accessorKey: 'title',
-        header: () => {
-          const isSorted = queryParams.sortBy === 'title';
-          const sortDirection = queryParams.sortDirection;
-          return (
-            <Button
-              variant="ghost"
-              className="px-2 py-0 text-xs hover:bg-surface-hover sm:px-2 sm:py-2 sm:text-sm"
-              onClick={() =>
-                handleSort('title', isSorted && sortDirection === 'asc' ? 'desc' : 'asc')
-              }
-            >
-              {localize('com_nav_archive_name')}
-              {isSorted && sortDirection === 'asc' && (
-                <ArrowUp className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />
-              )}
-              {isSorted && sortDirection === 'desc' && (
-                <ArrowDown className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />
-              )}
-              {!isSorted && <ArrowUpDown className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />}
-            </Button>
-          );
-        },
+        header: localize('com_nav_archive_name'),
         cell: ({ row }) => {
           const { conversationId, title } = row.original;
-          return (
-            <button
-              type="button"
-              className="flex items-center gap-2 truncate"
-              onClick={() => window.open(`/c/${conversationId}`, '_blank')}
+          const link = (
+            <Link
+              to={`/c/${conversationId ?? ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group text-text-primary focus-visible:ring-text-primary flex items-center gap-1.5 truncate rounded-sm font-medium underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-hidden"
+              aria-label={localize('com_ui_open_archived_chat_new_tab_title', {
+                title: title ?? localize('com_ui_untitled'),
+              })}
             >
+              <span className="truncate">{title}</span>
+              <ExternalLink
+                className="text-text-tertiary group-hover:text-text-secondary size-3.5 shrink-0 transition-colors"
+                aria-hidden="true"
+              />
+            </Link>
+          );
+          return (
+            <div className="flex w-0 min-w-full items-center gap-2.5">
               <MinimalIcon
                 endpoint={row.original.endpoint}
                 size={28}
                 isCreatedByUser={false}
                 iconClassName="size-4"
               />
-              <span className="underline">{title}</span>
-            </button>
+              {title ? <TooltipAnchor description={title} render={link} /> : link}
+            </div>
           );
         },
         meta: {
-          size: isSmallScreen ? '70%' : '50%',
-          mobileSize: '70%',
+          width: 55,
+          isRowHeader: true,
         },
       },
       {
-        accessorKey: 'createdAt',
-        header: () => {
-          const isSorted = queryParams.sortBy === 'createdAt';
-          const sortDirection = queryParams.sortDirection;
-          return (
-            <Button
-              variant="ghost"
-              className="px-2 py-0 text-xs hover:bg-surface-hover sm:px-2 sm:py-2 sm:text-sm"
-              onClick={() =>
-                handleSort('createdAt', isSorted && sortDirection === 'asc' ? 'desc' : 'asc')
-              }
-            >
-              {localize('com_nav_archive_created_at')}
-              {isSorted && sortDirection === 'asc' && (
-                <ArrowUp className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />
-              )}
-              {isSorted && sortDirection === 'desc' && (
-                <ArrowDown className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />
-              )}
-              {!isSorted && <ArrowUpDown className="ml-2 h-3 w-4 sm:h-4 sm:w-4" />}
-            </Button>
-          );
-        },
-        cell: ({ row }) => formatDate(row.original.createdAt?.toString() ?? '', isSmallScreen),
+        accessorKey: 'archivedAt',
+        header: localize('com_nav_archive_created_at'),
+        cell: ({ row }) => formatDate(getArchivedDate(row.original), isSmallScreen),
         meta: {
-          size: isSmallScreen ? '30%' : '35%',
-          mobileSize: '30%',
+          width: 25,
+          desktopOnly: true,
         },
       },
       {
-        accessorKey: 'actions',
-        header: () => (
-          <Label className="px-2 py-0 text-xs sm:px-2 sm:py-2 sm:text-sm">
-            {localize('com_assistants_actions')}
-          </Label>
-        ),
+        id: 'actions',
+        header: localize('com_assistants_actions'),
+        enableSorting: false,
         cell: ({ row }) => {
           const conversation = row.original;
           return (
             <div className="flex items-center gap-2">
               <TooltipAnchor
-                description={localize('com_ui_unarchive')}
+                description={localize('com_ui_unarchive_conversation')}
                 render={
                   <Button
-                    variant="ghost"
-                    className="h-8 w-8 p-0 hover:bg-surface-hover"
+                    variant="row-action"
+                    size="icon-sm"
                     onClick={() =>
-                      unarchiveMutation.mutate({
-                        conversationId: conversation.conversationId,
+                      unarchiveConversation({
+                        conversationId: conversation.conversationId ?? '',
                         isArchived: false,
                       })
                     }
-                    title={localize('com_ui_unarchive')}
-                    disabled={unarchiveMutation.isLoading}
+                    aria-label={localize('com_ui_unarchive_conversation')}
+                    disabled={isUnarchiving}
                   >
-                    {unarchiveMutation.isLoading ? (
-                      <Spinner />
-                    ) : (
-                      <ArchiveRestore className="size-4" />
-                    )}
+                    {isUnarchiving ? <Spinner /> : <ArchiveRestore className="size-4" />}
                   </Button>
                 }
               />
               <TooltipAnchor
-                description={localize('com_ui_delete')}
+                description={localize('com_ui_delete_conversation_tooltip')}
                 render={
                   <Button
-                    variant="ghost"
-                    className="h-8 w-8 p-0 hover:bg-surface-hover"
+                    variant="row-action"
+                    size="icon-sm"
                     onClick={() => {
                       setDeleteConversation(row.original);
                       setIsDeleteOpen(true);
                     }}
-                    title={localize('com_ui_delete')}
+                    aria-label={localize('com_ui_delete_conversation_tooltip')}
                   >
                     <TrashIcon className="size-4" />
                   </Button>
@@ -259,42 +256,55 @@ export default function ArchivedChatsTable({
           );
         },
         meta: {
-          size: '15%',
-          mobileSize: '25%',
+          width: 20,
         },
       },
     ],
-    [handleSort, isSmallScreen, localize, queryParams, unarchiveMutation],
+    [isSmallScreen, localize, unarchiveConversation, isUnarchiving],
   );
 
   return (
     <>
-      <DataTable
+      {/* The skeleton count matches the minimum height so the loading and loaded
+          states are close in size, while a short list still collapses the box. */}
+      <VirtualizedDataTable
         columns={columns}
         data={allConversations}
-        filterColumn="title"
-        onFilterChange={debouncedFilterChange}
+        getRowId={getRowId}
+        className="max-h-[60vh] min-h-80 scrollbar-gutter-stable"
+        onFilterChange={handleFilterChange}
         filterValue={queryParams.search}
         fetchNextPage={handleFetchNextPage}
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
+        isFetching={isFetching}
         isLoading={isLoading}
-        showCheckboxes={false}
-        enableSearch={isSearchEnabled}
+        sorting={sorting}
+        onSortingChange={handleSortingChange}
+        config={{
+          selection: { enableRowSelection: false, showCheckboxes: false },
+          skeleton: { count: 6 },
+          search: { enableSearch: searchState.enabled === true, debounce: 300 },
+        }}
       />
 
-      <OGDialog open={isDeleteOpen} onOpenChange={onOpenChange}>
-        <OGDialogContent
-          title={localize('com_ui_delete_confirm') + ' ' + (deleteConversation?.title ?? '')}
-          className="w-11/12 max-w-md"
-        >
+      <OGDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <OGDialogContent showCloseButton={false} className="w-11/12 max-w-md">
           <OGDialogHeader>
             <OGDialogTitle>
-              {localize('com_ui_delete_confirm')} <strong>{deleteConversation?.title}</strong>
+              <Trans
+                i18nKey="com_ui_delete_confirm_strong"
+                values={{ title: deleteConversation?.title }}
+                components={{ strong: <strong /> }}
+              />
             </OGDialogTitle>
           </OGDialogHeader>
           <div className="flex justify-end gap-4 pt-4">
-            <Button aria-label="cancel" variant="outline" onClick={() => setIsDeleteOpen(false)}>
+            <Button
+              aria-label={localize('com_ui_cancel')}
+              variant="outline"
+              onClick={() => setIsDeleteOpen(false)}
+            >
               {localize('com_ui_cancel')}
             </Button>
             <Button

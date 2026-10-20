@@ -1,21 +1,33 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { useRecoilValue } from 'recoil';
-import type { TAttachment } from 'librechat-data-provider';
+import { useMemo } from 'react';
+import { SquareTerminal } from 'lucide-react';
+import type { TAttachment, PartMetadata } from 'librechat-data-provider';
+import { parseBackgroundHandle, splitBackgroundAttachments } from './handle';
 import ProgressText from '~/components/Chat/Messages/Content/ProgressText';
-import MarkdownLite from '~/components/Chat/Messages/Content/MarkdownLite';
-import { useProgress, useLocalize } from '~/hooks';
+import { useMessagePartsHost } from '~/Providers/MessagePartsHostContext';
+import { toolPanelSpacingClassName } from '../disclosure';
+import useLazyHighlight from './useLazyHighlight';
+import useToolCallState from './useToolCallState';
+import CodeWindowHeader from './CodeWindowHeader';
+import useFollowScroll from './useFollowScroll';
 import { AttachmentGroup } from './Attachment';
+import { useToolCallIntent } from './intent';
+import { TOOL_ROW_CLASSES } from '../rows';
+import PtcToolTrace from './PtcToolTrace';
+import BareStatus from './BareStatus';
+import { useLocalize } from '~/hooks';
 import Stdout from './Stdout';
 import { cn } from '~/utils';
-import store from '~/store';
 
 interface ParsedArgs {
   lang?: string;
   code?: string;
 }
 
-export function useParseArgs(args?: string): ParsedArgs | null {
+export function useParseArgs(args?: string | Record<string, unknown>): ParsedArgs | null {
   return useMemo(() => {
+    if (typeof args === 'object' && args !== null) {
+      return { lang: String(args.lang ?? ''), code: String(args.code ?? '') };
+    }
     let parsedArgs: ParsedArgs | string | undefined | null = args;
     try {
       parsedArgs = JSON.parse(args || '');
@@ -44,182 +56,189 @@ export function useParseArgs(args?: string): ParsedArgs | null {
   }, [args]);
 }
 
+export const ERROR_PATTERNS = /^(Traceback|Error:|Exception:|.*Error:)/m;
+
 export default function ExecuteCode({
   isSubmitting,
+  runStepStatus,
+  runStepDurationMs,
+  backgrounded,
+  backgroundCancelled = false,
   initialProgress = 0.1,
   args,
   output = '',
   attachments,
+  hideAttachments = false,
+  onExpand,
+  toolCallId,
+  stepId,
 }: {
   initialProgress: number;
   isSubmitting: boolean;
-  args?: string;
+  runStepStatus?: PartMetadata['runStepStatus'];
+  runStepDurationMs?: PartMetadata['runStepDurationMs'];
+  backgrounded?: PartMetadata['backgrounded'];
+  backgroundCancelled?: boolean;
+  args?: string | Record<string, unknown>;
   output?: string;
   attachments?: TAttachment[];
+  hideAttachments?: boolean;
+  onExpand?: () => void;
+  toolCallId?: string;
+  stepId?: string;
 }) {
   const localize = useLocalize();
-  const hasOutput = output.length > 0;
-  const outputRef = useRef<string>(output);
-  const codeContentRef = useRef<HTMLDivElement>(null);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const showAnalysisCode = useRecoilValue(store.showCode);
-  const [showCode, setShowCode] = useState(showAnalysisCode);
-  const [contentHeight, setContentHeight] = useState<number | undefined>(0);
+  const { lang = 'py', code } = useParseArgs(args) ?? ({} as ParsedArgs);
+  /** Model-authored live label, streamed as the first args key; persists as
+   *  the settled label (completion is a UI state, not a tense change). */
+  const intent = useToolCallIntent(args);
+  const { useSandboxStarting } = useMessagePartsHost();
+  const sandboxStarting = useSandboxStarting(toolCallId ?? '');
 
-  const prevShowCodeRef = useRef<boolean>(showCode);
-  const { lang, code } = useParseArgs(args) ?? ({} as ParsedArgs);
-  const progress = useProgress(initialProgress);
+  const outputHasError = useMemo(() => ERROR_PATTERNS.test(output), [output]);
+  /** A backgrounded call's persisted output stays the dispatch handle until
+   *  the detached run settles and patches it; render a background state
+   *  instead of the handle JSON. Completion arrives live as the status marker
+   *  attachment (also covers stdout-only runs) or as harvested files.
+   *
+   *  Resolved before the phase, which folds `backgroundFailed` in: the
+   *  detached task's outcome is this card's outcome, and the dispatch step's
+   *  own output cannot express it. */
+  const backgroundHandle = useMemo(() => parseBackgroundHandle(output), [output]);
+  const { fileAttachments, backgroundStatus } = useMemo(
+    () => splitBackgroundAttachments(attachments, toolCallId),
+    [attachments, toolCallId],
+  );
+  const backgroundFailed = backgroundHandle != null && backgroundStatus === 'error';
+  const cancelledInBackground =
+    backgroundCancelled || (backgroundHandle != null && backgroundStatus === 'cancelled');
+  const backgroundFinishedText = backgroundHandle
+    ? localize(
+        backgroundStatus != null || (fileAttachments?.length ?? 0) > 0
+          ? 'com_ui_background_finished'
+          : 'com_ui_background_running',
+      )
+    : null;
 
-  useEffect(() => {
-    if (output !== outputRef.current) {
-      outputRef.current = output;
-
-      if (showCode && codeContentRef.current) {
-        setTimeout(() => {
-          if (codeContentRef.current) {
-            const newHeight = codeContentRef.current.scrollHeight;
-            setContentHeight(newHeight);
-          }
-        }, 10);
-      }
-    }
-  }, [output, showCode]);
-
-  useEffect(() => {
-    if (showCode !== prevShowCodeRef.current) {
-      prevShowCodeRef.current = showCode;
-
-      if (showCode && codeContentRef.current) {
-        setIsAnimating(true);
-        requestAnimationFrame(() => {
-          if (codeContentRef.current) {
-            const height = codeContentRef.current.scrollHeight;
-            setContentHeight(height);
-          }
-
-          const timer = setTimeout(() => {
-            setIsAnimating(false);
-          }, 500);
-
-          return () => clearTimeout(timer);
-        });
-      } else if (!showCode) {
-        setIsAnimating(true);
-        setContentHeight(0);
-
-        const timer = setTimeout(() => {
-          setIsAnimating(false);
-        }, 500);
-
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [showCode]);
-
-  useEffect(() => {
-    if (!codeContentRef.current) {
-      return;
-    }
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (showCode && !isAnimating) {
-        for (const entry of entries) {
-          if (entry.target === codeContentRef.current) {
-            setContentHeight(entry.contentRect.height);
-          }
-        }
-      }
+  const { showCode, toggleCode, expandStyle, expandRef, phase, hasOutput, bare, rowRef } =
+    useToolCallState({
+      initialProgress,
+      isSubmitting,
+      output,
+      hasInput: !!code,
+      onExpand,
+      runStepStatus,
+      extraError: backgroundFailed,
+      extraCancelled: cancelledInBackground,
+      keepRow: backgroundHandle != null || intent != null,
     });
 
-    resizeObserver.observe(codeContentRef.current);
+  const highlighted = useLazyHighlight(showCode ? code : undefined, lang);
+  const { ref: codePaneRef, onScroll: onCodePaneScroll } = useFollowScroll<HTMLPreElement>(
+    highlighted ?? code ?? '',
+    phase === 'running',
+    showCode,
+  );
 
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [showCode, isAnimating]);
-
-  const cancelled = !isSubmitting && progress < 1;
+  const finishedText =
+    phase === 'cancelled'
+      ? localize('com_ui_cancelled')
+      : (backgroundFinishedText ?? intent ?? localize('com_ui_analyzing_finished'));
 
   return (
     <>
-      <div className="relative my-2.5 flex size-5 shrink-0 items-center gap-2.5">
-        <ProgressText
-          progress={progress}
-          onClick={() => setShowCode((prev) => !prev)}
-          inProgressText={localize('com_ui_analyzing')}
-          finishedText={
-            cancelled ? localize('com_ui_cancelled') : localize('com_ui_analyzing_finished')
-          }
-          hasInput={!!code?.length}
-          isExpanded={showCode}
-          error={cancelled}
-        />
-      </div>
-      <div
-        className="relative mb-2"
-        style={{
-          height: showCode ? contentHeight : 0,
-          overflow: 'hidden',
-          transition:
-            'height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-          opacity: showCode ? 1 : 0,
-          transformOrigin: 'top',
-          willChange: 'height, opacity',
-          perspective: '1000px',
-          backfaceVisibility: 'hidden',
-          WebkitFontSmoothing: 'subpixel-antialiased',
-        }}
-      >
+      <BareStatus active={bare} text={finishedText} />
+      {!bare && (
         <div
-          className={cn(
-            'code-analyze-block mt-0.5 overflow-hidden rounded-xl bg-surface-primary',
-            showCode && 'shadow-lg',
-          )}
-          ref={codeContentRef}
-          style={{
-            transform: showCode ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.98)',
-            opacity: showCode ? 1 : 0,
-            transition:
-              'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
-          }}
+          className={TOOL_ROW_CLASSES}
+          ref={rowRef}
+          data-task-tool-call={toolCallId}
+          data-task-step={stepId}
         >
-          {showCode && (
-            <div
-              style={{
-                transform: showCode ? 'translateY(0)' : 'translateY(-4px)',
-                opacity: showCode ? 1 : 0,
-                transition:
-                  'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1)',
-              }}
-            >
-              <MarkdownLite
-                content={code ? `\`\`\`${lang}\n${code}\n\`\`\`` : ''}
-                codeExecution={false}
+          <ProgressText
+            phase={phase}
+            onClick={toggleCode}
+            inProgressText={
+              intent ??
+              (sandboxStarting ? localize('com_ui_sandbox_starting') : localize('com_ui_analyzing'))
+            }
+            finishedText={finishedText}
+            /** A backgrounded call's run step closes when dispatch returns the
+             *  handle, so its duration is the dispatch time, and showing it would
+             *  misstate a detached task's runtime as seconds. The handle check
+             *  covers the live card; the persisted `backgrounded` marker covers
+             *  the card after harvest replaces the handle with real stdout
+             *  (and after any reload), when no transient signal survives. */
+            durationMs={
+              backgroundHandle == null && backgrounded !== true ? runStepDurationMs : undefined
+            }
+            icon={
+              <SquareTerminal
+                className={cn(
+                  'text-text-secondary size-4 shrink-0',
+                  phase === 'running' && 'animate-pulse',
+                )}
+                aria-hidden="true"
               />
-            </div>
-          )}
-          {hasOutput && (
-            <div
-              className={cn(
-                'bg-surface-tertiary p-4 text-xs',
-                showCode ? 'border-t border-surface-primary-contrast' : '',
-              )}
-              style={{
-                transform: showCode ? 'translateY(0)' : 'translateY(-6px)',
-                opacity: showCode ? 1 : 0,
-                transition:
-                  'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.05s, opacity 0.45s cubic-bezier(0.19, 1, 0.22, 1) 0.05s',
-                boxShadow: showCode ? '0 -1px 0 rgba(0,0,0,0.05)' : 'none',
-              }}
-            >
-              <div className="prose flex flex-col-reverse">
-                <Stdout output={output} />
+            }
+            hasInput={!!code?.length}
+            isExpanded={showCode}
+          />
+        </div>
+      )}
+      <div style={expandStyle}>
+        <div className="overflow-hidden" ref={expandRef}>
+          <div
+            className={cn(
+              toolPanelSpacingClassName,
+              'border-border-light bg-surface-secondary overflow-hidden rounded-lg border',
+            )}
+          >
+            {code && <CodeWindowHeader language={lang} code={code} />}
+            {code && (
+              <pre
+                ref={codePaneRef}
+                onScroll={onCodePaneScroll}
+                className="bg-surface-code-body max-h-[18.75rem] overflow-auto p-4 font-mono text-xs"
+              >
+                <code className={`hljs language-${lang} !whitespace-pre`}>
+                  {highlighted ?? code}
+                </code>
+              </pre>
+            )}
+            <PtcToolTrace
+              toolCallId={toolCallId}
+              expanded={showCode}
+              className={cn(code && 'border-border-inset border-t')}
+            />
+            {hasOutput && backgroundHandle == null && (
+              <div
+                className={cn(
+                  /* No fill of its own: the output shows the panel's surface-secondary in both
+                   * modes, which is the surface-primary-alt it was painted in light. */
+                  'p-4 text-xs',
+                  code && 'border-border-inset border-t',
+                )}
+              >
+                <div className="text-text-secondary text-3xs mb-1.5 font-medium tracking-wide uppercase">
+                  {localize('com_ui_output')}
+                </div>
+                <div
+                  className={cn(
+                    'max-h-[12.5rem] overflow-auto',
+                    outputHasError ? 'text-status-error' : 'text-text-primary',
+                  )}
+                >
+                  <Stdout output={output} />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
-      {attachments && attachments.length > 0 && <AttachmentGroup attachments={attachments} />}
+      {!hideAttachments && fileAttachments && fileAttachments.length > 0 && (
+        <AttachmentGroup attachments={fileAttachments} />
+      )}
     </>
   );
 }

@@ -6,7 +6,7 @@ export interface MentionItemProps {
   name: string;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   index: number;
-  type?: 'prompt' | 'mention' | 'add-convo';
+  type?: 'prompt' | 'mention' | 'add-convo' | 'skill';
   icon?: React.ReactNode;
   isActive?: boolean;
   description?: string;
@@ -25,29 +25,28 @@ export default function MentionItem({
 }: MentionItemProps) {
   return (
     <button
+      type="button"
+      style={style}
       tabIndex={index}
       onClick={onClick}
       id={`${type}-item-${index}`}
-      className="w-full"
-      style={style}
+      className="w-full touch-manipulation"
     >
       <div
         className={cn(
-          'text-token-text-primary bg-token-main-surface-secondary group flex h-10 items-center gap-2 rounded-lg px-2 text-sm font-medium hover:bg-surface-secondary',
+          'text-text-primary group hover:bg-surface-secondary active:bg-surface-active flex min-h-[2.75rem] items-center gap-2 rounded-lg px-2 text-sm font-medium',
           isActive === true ? 'bg-surface-active' : 'bg-transparent',
         )}
       >
-        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center">{icon}</div>
-        <div className="flex min-w-0 flex-grow items-center justify-between">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center">{icon}</div>
+        <div className="flex min-w-0 grow items-center justify-between">
           <div className="truncate">
             <span className="font-medium">{name}</span>
             {description != null && description ? (
-              <span className="text-token-text-tertiary ml-2 text-sm font-light">
-                {description}
-              </span>
+              <span className="text-text-tertiary ml-2 text-sm font-light">{description}</span>
             ) : null}
           </div>
-          <Clock4 size={16} className="ml-2 flex-shrink-0" />
+          <Clock4 size={16} className="ml-2 shrink-0" />
         </div>
       </div>
     </button>
