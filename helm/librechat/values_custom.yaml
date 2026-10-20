@@ -458,7 +458,8 @@ librechat-rag-api:
 
 
 image:
-  repository: danny-avila/librechat
+  # Images moved to the LibreChat-AI org; danny-avila/* stopped publishing after v0.8.0.
+  repository: librechat-ai/librechat
   registry: ghcr.io
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
