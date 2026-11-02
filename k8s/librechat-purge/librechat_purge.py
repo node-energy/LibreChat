@@ -227,9 +227,16 @@ def purge_conversations(db, args, roots: dict) -> int:
     # Records of files that fail to delete are kept; --purge-unused-files retries them
     print(f"Deleting {len(files)} file(s)...")
     failed = delete_files(db, files, roots, "file")
-    messages = db["messages"].delete_many({"conversationId": {"$in": conv_ids}}).deleted_count
-    conversations = db["conversations"].delete_many({"conversationId": {"$in": conv_ids}}).deleted_count
-    print(f"✅  Deleted {conversations} conversation(s), {messages} message(s).")
+    in_convs = {"conversationId": {"$in": conv_ids}}
+    messages = db["messages"].delete_many(in_convs).deleted_count
+    conversations = db["conversations"].delete_many(in_convs).deleted_count
+    # Mirror LibreChat's own chat deletion: shared links (+ their ACL entries) and tool calls
+    links = [s["_id"] for s in db["sharedlinks"].find(in_convs, {"_id": 1})]
+    if links:
+        db["sharedlinks"].delete_many({"_id": {"$in": links}})
+        db["aclentries"].delete_many({"resourceType": "sharedLink", "resourceId": {"$in": links}})
+    db["toolcalls"].delete_many(in_convs)
+    print(f"✅  Deleted {conversations} conversation(s), {messages} message(s), {len(links)} shared link(s).")
     return failed
 
 
