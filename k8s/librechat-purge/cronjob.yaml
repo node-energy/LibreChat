@@ -15,7 +15,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
-          # The images PVC is ReadWriteOnce: run on the node that already mounts it
+          # The PVCs are ReadWriteOnce: run on the node that already mounts them
           affinity:
             podAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -27,11 +27,10 @@ spec:
             - name: images
               persistentVolumeClaim:
                 claimName: librechat-librechat-images
-            # Uncomment if LibreChat persists /app/uploads (PDFs, documents) on a PVC;
-            # use the claimName from its deployment. Must also be on the LibreChat node (RWO).
-            # - name: uploads
-            #   persistentVolumeClaim:
-            #     claimName: <librechat-uploads-pvc>
+            # PVC LibreChat mounts at /app/uploads (PDFs, documents)
+            - name: uploads
+              persistentVolumeClaim:
+                claimName: <librechat-uploads-pvc>
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -59,10 +58,10 @@ spec:
                   value: "180"
                 - name: IMAGES_PATH
                   value: /images
-                # - name: UPLOADS_PATH
-                #   value: /uploads
+                - name: UPLOADS_PATH
+                  value: /uploads
               volumeMounts:
                 - name: images
                   mountPath: /images
-                # - name: uploads
-                #   mountPath: /uploads
+                - name: uploads
+                  mountPath: /uploads
