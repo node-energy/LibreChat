@@ -97,7 +97,12 @@ def referenced_file_ids(db, file_ids: list[str], ignore_conv_ids: list[str]) -> 
 
 
 def referenced_paths(db, prefixes: list[str]) -> set[str]:
-    """Every <prefix><userId>/<file> path still referenced, normalized (no host, no ?query)."""
+    """Every referenced <userId>/<file> under any prefix, normalized (no host, no ?query).
+
+    The prefix is dropped on purpose: a file counts as referenced no matter which
+    volume it is found on, so a misconfigured mount can never make a referenced
+    file look orphaned.
+    """
     pattern = "|".join(re.escape(p) for p in prefixes)
     refs = set()
     for collection, field in FILEPATH_REFS:
@@ -105,7 +110,7 @@ def referenced_paths(db, prefixes: list[str]) -> set[str]:
             for value in values_at(doc, field):
                 prefix = next((p for p in prefixes if isinstance(value, str) and p in value), None)
                 if prefix:
-                    refs.add(prefix + value.split(prefix, 1)[1].split("?", 1)[0])
+                    refs.add(value.split(prefix, 1)[1].split("?", 1)[0])
     return refs
 
 
@@ -254,17 +259,17 @@ def sweep_orphans(db, args, roots: dict) -> int:
     """Files under <mount>/<userId>/ older than --days that no DB record references."""
     mounted = {prefix: mount for prefix, mount in roots.items() if mount}
     print(f"\nOrphaned files under {', '.join(mounted.values())} older than {args.days} days")
-    refs = referenced_paths(db, list(mounted))
+    refs = referenced_paths(db, list(roots))
     limit = cutoff(args.days).timestamp()
     orphans = []
-    for prefix, mount in mounted.items():
+    for mount in mounted.values():
         for user in os.scandir(mount):
             if not user.is_dir(follow_symlinks=False) or not OBJECT_ID.match(user.name):
                 continue
             for entry in os.scandir(user.path):
                 if (entry.is_file(follow_symlinks=False)
                         and entry.stat(follow_symlinks=False).st_mtime < limit
-                        and f"{prefix}{user.name}/{entry.name}" not in refs):
+                        and f"{user.name}/{entry.name}" not in refs):
                     orphans.append(entry.path)
     orphans.sort()
 
@@ -312,6 +317,13 @@ def main():
             if path and not os.path.isdir(path):
                 print(f"❌  {prefix.strip('/').capitalize()} path {path} is not mounted; refusing to delete.")
                 raise SystemExit(1)
+        mounted = [os.path.realpath(p) for p in roots.values() if p]
+        for i, a in enumerate(mounted):
+            for b in mounted[i + 1:]:
+                if os.path.samefile(a, b) or os.path.commonpath([a, b]) in (a, b):
+                    print(f"❌  {a} and {b} are the same or nested volumes; images and uploads "
+                          f"must be separate directories. Refusing to delete.")
+                    raise SystemExit(1)
         if not args.uploads_path:
             print("⚠️  UPLOADS_PATH not set: files under /uploads (PDFs, documents) "
                   "are not deleted from disk and keep their DB record.\n")

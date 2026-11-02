@@ -3,7 +3,9 @@ kind: CronJob
 metadata:
   name: librechat-purge
 spec:
-  schedule: "0 0 * * *"
+  # Deployed suspended: unsuspend only after a dry run looks right
+  suspend: true
+  schedule: "* * * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
   concurrencyPolicy: Forbid
@@ -15,7 +17,7 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
-          # The PVCs are ReadWriteOnce: run on the node that already mounts them
+          # The images PVC is ReadWriteOnce: run on the node that already mounts it
           affinity:
             podAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -27,10 +29,6 @@ spec:
             - name: images
               persistentVolumeClaim:
                 claimName: librechat-librechat-images
-            # PVC LibreChat mounts at /app/uploads (PDFs, documents)
-            - name: uploads
-              persistentVolumeClaim:
-                claimName: <librechat-uploads-pvc>
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -58,10 +56,6 @@ spec:
                   value: "180"
                 - name: IMAGES_PATH
                   value: /images
-                - name: UPLOADS_PATH
-                  value: /uploads
               volumeMounts:
                 - name: images
                   mountPath: /images
-                - name: uploads
-                  mountPath: /uploads
