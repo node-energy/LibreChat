@@ -19,6 +19,9 @@ DB_NAME = os.getenv("LIBRECHAT_DB_NAME", "LibreChat")
 DAYS_STALE = int(os.getenv("STALE_DAYS", "180"))
 IMAGES_PATH = os.getenv("IMAGES_PATH", "/images")
 UPLOADS_PATH = os.getenv("UPLOADS_PATH", "")
+# UPLOADS_PATH value for a LibreChat whose /app/uploads is not on a volume: the files are
+# gone after every pod restart, so only their DB records are removed
+EPHEMERAL = "ephemeral"
 
 OBJECT_ID = re.compile(r"^[0-9a-f]{24}$", re.IGNORECASE)
 # File contexts created by chatting (FileContext); agent, assistant, skill and avatar files are never touched
@@ -116,7 +119,7 @@ def disk_path(filepath: str, roots: dict) -> tuple[str | None, str | None]:
     unknown, its volume is not mounted, or the path escapes its root."""
     clean = filepath.split("?", 1)[0]  # drop ?v=<timestamp> cache-bust suffix
     prefix = next((p for p in roots if clean.startswith(p)), None)
-    if not prefix or not roots[prefix]:
+    if not prefix or roots[prefix] in (None, EPHEMERAL):
         return None, prefix
     root = os.path.realpath(roots[prefix])
     full = os.path.realpath(os.path.join(root, clean[len(prefix):]))
@@ -149,6 +152,8 @@ def delete_files(db, files: list[dict], roots: dict, label: str) -> int:
             print(f"  ⚠️  Non-local file, removing DB record only: {f.get('source')} — {filepath}")
         elif prefix is None:
             print(f"  ⚠️  Unknown local path, removing DB record only: {filepath!r}")
+        elif roots[prefix] == EPHEMERAL:
+            stats["missing"] += 1
         elif path is None:
             reason = "path escapes its volume" if roots[prefix] else f"volume for {prefix} is not mounted"
             print(f"  ❌  {filepath}: {reason}, keeping DB record")
@@ -252,7 +257,7 @@ def purge_unused_files(db, args, roots: dict) -> int:
 
 def sweep_orphans(db, args, roots: dict) -> int:
     """Files under <mount>/<userId>/ older than --days that no DB record references."""
-    mounted = {prefix: mount for prefix, mount in roots.items() if mount}
+    mounted = {prefix: mount for prefix, mount in roots.items() if mount and mount != EPHEMERAL}
     print(f"\nOrphaned files under {', '.join(mounted.values())} older than {args.days} days")
     refs = referenced_paths(db, list(mounted))
     limit = cutoff(args.days).timestamp()
@@ -293,7 +298,8 @@ def main():
                         help=f"Mount path of LibreChat's images volume (default: {IMAGES_PATH})")
     parser.add_argument("--uploads-path", default=UPLOADS_PATH,
                         help="Mount path of LibreChat's uploads volume (PDFs, documents); "
-                             "unset = not mounted, those files keep their DB record")
+                             "unset = not mounted, those files keep their DB record; "
+                             f"'{EPHEMERAL}' = /app/uploads is not persisted, only DB records are removed")
     parser.add_argument("--show-ids", action="store_true", help="Print conversationId in table")
     parser.add_argument("--delete", action="store_true", help="Perform deletion (default: list only)")
     parser.add_argument("--yes", action="store_true", help="Skip confirmation prompts")
@@ -305,11 +311,11 @@ def main():
                              "and that are older than --days")
     args = parser.parse_args()
 
-    # LibreChat filepath prefix -> mount path in this container (None = not mounted)
+    # LibreChat filepath prefix -> mount path in this container (None = not mounted, EPHEMERAL = not persisted)
     roots = {"/images/": args.images_path, "/uploads/": args.uploads_path or None}
     if args.delete or args.sweep_orphans:
         for prefix, path in roots.items():
-            if path and not os.path.isdir(path):
+            if path and path != EPHEMERAL and not os.path.isdir(path):
                 print(f"❌  {prefix.strip('/').capitalize()} path {path} is not mounted; refusing to delete.")
                 raise SystemExit(1)
         if not args.uploads_path:

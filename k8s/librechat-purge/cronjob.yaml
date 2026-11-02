@@ -59,6 +59,10 @@ spec:
                   value: "180"
                 - name: IMAGES_PATH
                   value: /images
+                # /app/uploads is not on a volume in LibreChat: PDFs are gone after a restart,
+                # so only their DB records are removed
+                - name: UPLOADS_PATH
+                  value: ephemeral
                 # - name: UPLOADS_PATH
                 #   value: /uploads
               volumeMounts:
