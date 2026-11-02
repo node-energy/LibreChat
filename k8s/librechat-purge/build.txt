@@ -15,6 +15,8 @@ docker push $IMAGE:$TAG
 # ── 2. Check PVC name and LibreChat pod label ────────────────────────────────
 kubectl -n $NS get pvc librechat-librechat-images
 kubectl -n $NS get pods -l app.kubernetes.io/name=librechat-librechat -o wide
+# Is /app/uploads (PDFs, documents) on a PVC? If yes, enable the uploads block in cronjob.yaml with that claimName
+kubectl -n $NS get deploy librechat-librechat -o jsonpath='{range .spec.template.spec.containers[0].volumeMounts[*]}{.mountPath}{"  ->  "}{.name}{"\n"}{end}{range .spec.template.spec.volumes[*]}{.name}{"  =  "}{.persistentVolumeClaim.claimName}{"\n"}{end}'
 
 # ── 3. Apply the CronJob ─────────────────────────────────────────────────────
 kubectl -n $NS apply -f k8s/librechat-purge/cronjob.yaml
