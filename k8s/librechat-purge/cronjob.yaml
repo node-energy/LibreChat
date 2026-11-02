@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: librechat-purge
 spec:
-  schedule: "* * * * *"
+  schedule: "0 0 * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
   concurrencyPolicy: Forbid
