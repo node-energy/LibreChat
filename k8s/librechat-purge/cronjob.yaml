@@ -6,11 +6,27 @@ spec:
   schedule: "0 0 * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
   jobTemplate:
     spec:
+      # Pod stays Pending if no LibreChat pod is running to co-locate with
+      activeDeadlineSeconds: 3600
       template:
         spec:
           restartPolicy: OnFailure
+          # The images PVC is ReadWriteOnce: run on the node that already mounts it
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: librechat-librechat
+                  topologyKey: kubernetes.io/hostname
+          volumes:
+            - name: images
+              persistentVolumeClaim:
+                claimName: librechat-librechat-images
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -36,3 +52,8 @@ spec:
                   value: "http://librechat-librechat:3080"
                 - name: STALE_DAYS
                   value: "180"
+                - name: IMAGES_PATH
+                  value: /images
+              volumeMounts:
+                - name: images
+                  mountPath: /images
