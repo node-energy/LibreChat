@@ -20,7 +20,7 @@ kubectl -n $NS get pods -l app.kubernetes.io/name=librechat-librechat -o wide
 kubectl -n $NS apply -f k8s/librechat-purge/cronjob.yaml
 
 # ── 4. Dry run (lists only, deletes nothing) ─────────────────────────────────
-kubectl -n $NS create job librechat-purge-dryrun --from=cronjob/librechat-purge --dry-run=client -o yaml | sed '/args: \["--delete", "--yes"\]/d' | kubectl -n $NS apply -f -
+kubectl -n $NS create job librechat-purge-dryrun --from=cronjob/librechat-purge --dry-run=client -o yaml | sed -e '/- --delete$/d' -e '/- --yes$/d' | kubectl -n $NS apply -f -
 kubectl -n $NS get pods -l job-name=librechat-purge-dryrun -o wide
 kubectl -n $NS logs -f job/librechat-purge-dryrun
 kubectl -n $NS delete job librechat-purge-dryrun

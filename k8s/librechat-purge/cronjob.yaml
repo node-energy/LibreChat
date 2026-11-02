@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: librechat-purge
 spec:
-  schedule: "0 0 * * *"
+  schedule: "* * * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
   concurrencyPolicy: Forbid
@@ -37,7 +37,7 @@ spec:
           containers:
             - name: purge
               image: nodeenergy.azurecr.io/librechat-purge:8b3598d07
-              args: ["--delete", "--yes"]
+              args: ["--delete", "--yes", "--sweep-orphans"]
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
