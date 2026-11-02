@@ -3,7 +3,7 @@ kind: CronJob
 metadata:
   name: librechat-purge
 spec:
-  schedule: "0 0 * * *"
+  schedule: "* * * * *"
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
   concurrencyPolicy: Forbid
@@ -27,6 +27,11 @@ spec:
             - name: images
               persistentVolumeClaim:
                 claimName: librechat-librechat-images
+            # Uncomment if LibreChat persists /app/uploads (PDFs, documents) on a PVC;
+            # use the claimName from its deployment. Must also be on the LibreChat node (RWO).
+            # - name: uploads
+            #   persistentVolumeClaim:
+            #     claimName: <librechat-uploads-pvc>
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
@@ -36,8 +41,8 @@ spec:
               type: RuntimeDefault
           containers:
             - name: purge
-              image: nodeenergy.azurecr.io/librechat-purge:latest
-              args: ["--delete", "--yes"]
+              image: nodeenergy.azurecr.io/librechat-purge:d39eff174
+              args: ["--delete", "--yes", "--purge-unused-files", "--sweep-orphans"]
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -54,6 +59,10 @@ spec:
                   value: "180"
                 - name: IMAGES_PATH
                   value: /images
+                # - name: UPLOADS_PATH
+                #   value: /uploads
               volumeMounts:
                 - name: images
                   mountPath: /images
+                # - name: uploads
+                #   mountPath: /uploads
