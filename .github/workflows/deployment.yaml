@@ -69,6 +69,12 @@ jobs:
       - name: helm build rag-api
         run: helm dependency build helm/librechat-rag-api
 
+      - name: Ensure namespace exists with external gateway label
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml \
+          | kubectl label --local -f - external-gateway-access=true -o yaml \
+          | kubectl apply -f -
+
       - name: Helm upgrade rag-api
         run: >-
           helm upgrade librechat-rag-api helm/librechat-rag-api
@@ -77,7 +83,6 @@ jobs:
           --debug
           --timeout 240s
           --namespace ${{ env.NAMESPACE }}
-          --create-namespace
           --history-max 5
           --wait
 
